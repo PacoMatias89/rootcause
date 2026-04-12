@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: rootcause
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:rootcause}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:Kombolo_1989}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
+
+logging:
+  level:
+    org.springframework.web: INFO
+    org.hibernate.SQL: INFO
