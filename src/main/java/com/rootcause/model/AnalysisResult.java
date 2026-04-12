@@ -12,14 +12,11 @@ public record AnalysisResult(
         Severity severity,
         String probableCause,
         List<String> detectedPatterns,
-        List<String> recommendedActions,
+        List<String> recommendedSteps,
         BigDecimal confidence
 ) {
-
-    public AnalysisResult{
+    public AnalysisResult {
         detectedPatterns = detectedPatterns == null ? List.of() : List.copyOf(detectedPatterns);
-        recommendedActions = recommendedActions == null ? List.of() : List.copyOf(recommendedActions);
+        recommendedSteps = recommendedSteps == null ? List.of() : List.copyOf(recommendedSteps);
     }
-
-
 }
