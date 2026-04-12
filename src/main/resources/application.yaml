@@ -1,11 +1,14 @@
 spring:
+  config:
+    import: optional:classpath:.env[.properties]
+
   application:
     name: rootcause
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:rootcause}
-    username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:Kombolo_1989}
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   jpa:
