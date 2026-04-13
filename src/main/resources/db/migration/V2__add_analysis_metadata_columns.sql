@@ -1,30 +1,35 @@
-alter table analysis_record
-    add column rule_code varchar(200);
+ALTER TABLE analysis_record
+    ADD COLUMN rule_code VARCHAR(100);
 
-alter table analysis_record
-    add column raw_input_length integer;
+ALTER TABLE analysis_record
+    ADD COLUMN raw_input_length INTEGER;
 
-alter table analysis_record
-    add column matched_input_count integer;
+ALTER TABLE analysis_record
+    ADD COLUMN matched_rule_count INTEGER;
 
-update analysis_record
-set rule_code = 'UNKNOWN_RULE'
-where rule_code is null;
+UPDATE analysis_record
+SET rule_code = 'UNKNOWN_RULE'
+WHERE rule_code IS NULL;
 
-update analysis_record
-set matched_input_count = case
-    whem category = 'UNKNOWN' then 0
-    else 1
-end
-where matched_input_count is null;
+UPDATE analysis_record
+SET raw_input_length = CHAR_LENGTH(input_text)
+WHERE raw_input_length IS NULL;
 
-alter table analysis_record
-    alter column rule_code set not null;
+UPDATE analysis_record
+SET matched_rule_count = CASE
+                             WHEN category = 'UNKNOWN' THEN 0
+                             ELSE 1
+    END
+WHERE matched_rule_count IS NULL;
 
-alter table analysis_record
-    alter column raw_input_length set not null;
+ALTER TABLE analysis_record
+    ALTER COLUMN rule_code SET NOT NULL;
 
-alter table analysis_record
-    alter column matched_input_count set not null;
+ALTER TABLE analysis_record
+    ALTER COLUMN raw_input_length SET NOT NULL;
 
-create index idx_analysis_record_rule_code on analysis_record(rule_code);
+ALTER TABLE analysis_record
+    ALTER COLUMN matched_rule_count SET NOT NULL;
+
+CREATE INDEX idx_analysis_record_rule_code
+    ON analysis_record(rule_code);

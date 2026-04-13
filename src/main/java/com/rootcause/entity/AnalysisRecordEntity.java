@@ -1,6 +1,9 @@
 package com.rootcause.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -11,7 +14,6 @@ import java.util.UUID;
 public class AnalysisRecordEntity {
 
     @Id
-    @Column(name = "id", nullable = false)
     private UUID id;
 
     @Column(name = "input_text", nullable = false, columnDefinition = "TEXT")
@@ -35,17 +37,23 @@ public class AnalysisRecordEntity {
     @Column(name = "confidence", nullable = false, precision = 5, scale = 2)
     private BigDecimal confidence;
 
+    @Column(name = "rule_code", nullable = false, length = 100)
+    private String ruleCode;
+
+    @Column(name = "raw_input_length", nullable = false)
+    private Integer rawInputLength;
+
+    @Column(name = "matched_rule_count", nullable = false)
+    private Integer matchedRuleCount;
+
     @Column(name = "analyzed_at", nullable = false)
     private OffsetDateTime analyzedAt;
-
-    public AnalysisRecordEntity() {
-    }
 
     public UUID getId() {
         return id;
     }
 
-    public void setId(UUID id) {
+    public void setId(final UUID id) {
         this.id = id;
     }
 
@@ -53,7 +61,7 @@ public class AnalysisRecordEntity {
         return inputText;
     }
 
-    public void setInputText(String inputText) {
+    public void setInputText(final String inputText) {
         this.inputText = inputText;
     }
 
@@ -61,7 +69,7 @@ public class AnalysisRecordEntity {
         return category;
     }
 
-    public void setCategory(String category) {
+    public void setCategory(final String category) {
         this.category = category;
     }
 
@@ -69,7 +77,7 @@ public class AnalysisRecordEntity {
         return severity;
     }
 
-    public void setSeverity(String severity) {
+    public void setSeverity(final String severity) {
         this.severity = severity;
     }
 
@@ -77,7 +85,7 @@ public class AnalysisRecordEntity {
         return probableCause;
     }
 
-    public void setProbableCause(String probableCause) {
+    public void setProbableCause(final String probableCause) {
         this.probableCause = probableCause;
     }
 
@@ -85,7 +93,7 @@ public class AnalysisRecordEntity {
         return detectedPatterns;
     }
 
-    public void setDetectedPatterns(String detectedPatterns) {
+    public void setDetectedPatterns(final String detectedPatterns) {
         this.detectedPatterns = detectedPatterns;
     }
 
@@ -93,7 +101,7 @@ public class AnalysisRecordEntity {
         return recommendedSteps;
     }
 
-    public void setRecommendedSteps(String recommendedSteps) {
+    public void setRecommendedSteps(final String recommendedSteps) {
         this.recommendedSteps = recommendedSteps;
     }
 
@@ -101,15 +109,39 @@ public class AnalysisRecordEntity {
         return confidence;
     }
 
-    public void setConfidence(BigDecimal confidence) {
+    public void setConfidence(final BigDecimal confidence) {
         this.confidence = confidence;
+    }
+
+    public String getRuleCode() {
+        return ruleCode;
+    }
+
+    public void setRuleCode(final String ruleCode) {
+        this.ruleCode = ruleCode;
+    }
+
+    public Integer getRawInputLength() {
+        return rawInputLength;
+    }
+
+    public void setRawInputLength(final Integer rawInputLength) {
+        this.rawInputLength = rawInputLength;
+    }
+
+    public Integer getMatchedRuleCount() {
+        return matchedRuleCount;
+    }
+
+    public void setMatchedRuleCount(final Integer matchedRuleCount) {
+        this.matchedRuleCount = matchedRuleCount;
     }
 
     public OffsetDateTime getAnalyzedAt() {
         return analyzedAt;
     }
 
-    public void setAnalyzedAt(OffsetDateTime analyzedAt) {
+    public void setAnalyzedAt(final OffsetDateTime analyzedAt) {
         this.analyzedAt = analyzedAt;
     }
 }

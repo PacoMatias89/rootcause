@@ -13,7 +13,10 @@ public record AnalysisResult(
         String probableCause,
         List<String> detectedPatterns,
         List<String> recommendedSteps,
-        BigDecimal confidence
+        BigDecimal confidence,
+        String ruleCode,
+        Integer rawInputLength,
+        Integer matchedRuleCount
 ) {
     public AnalysisResult {
         detectedPatterns = detectedPatterns == null ? List.of() : List.copyOf(detectedPatterns);

@@ -1,11 +1,17 @@
 package com.rootcause.service;
 
+import com.rootcause.exception.AnalysisNotFoundException;
 import com.rootcause.mapper.AnalysisRecordMapper;
-import com.rootcause.model.*;
+import com.rootcause.model.AnalysisRequestContext;
+import com.rootcause.model.AnalysisResult;
+import com.rootcause.model.ErrorCategory;
+import com.rootcause.model.RuleMatch;
+import com.rootcause.model.Severity;
 import com.rootcause.repository.AnalysisRecordRepository;
 import com.rootcause.rules.AnalysisRule;
 import com.rootcause.util.ScoreUtils;
 import com.rootcause.util.TextNormalizer;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -14,19 +20,20 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
-import static com.rootcause.model.Severity.CRITICAL;
-import static com.rootcause.model.Severity.HIGH;
-
+@Service
 public class AnalysisServiceImpl implements AnalysisService {
+
     private final List<AnalysisRule> rules;
     private final AnalysisRecordRepository analysisRecordRepository;
     private final AnalysisRecordMapper analysisRecordMapper;
     private final Clock clock;
 
-    public AnalysisServiceImpl(List<AnalysisRule> rules,
-                               AnalysisRecordRepository analysisRecordRepository,
-                               AnalysisRecordMapper analysisRecordMapper,
-                               Clock clock) {
+    public AnalysisServiceImpl(
+            final List<AnalysisRule> rules,
+            final AnalysisRecordRepository analysisRecordRepository,
+            final AnalysisRecordMapper analysisRecordMapper,
+            final Clock clock
+    ) {
         if (rules == null || rules.isEmpty()) {
             throw new IllegalArgumentException("At least one analysis rule must be configured");
         }
@@ -36,21 +43,26 @@ public class AnalysisServiceImpl implements AnalysisService {
         this.analysisRecordMapper = analysisRecordMapper;
         this.clock = clock;
     }
+
     @Override
     @Transactional
-    public AnalysisResult analyze(String inputText) {
-        if(inputText == null || inputText.isBlank()) {
+    public AnalysisResult analyze(final String inputText) {
+        if (inputText == null || inputText.isBlank()) {
             throw new IllegalArgumentException("Input text must not be blank");
         }
 
-        String sanitizedInput = inputText.trim();
-        AnalysisRequestContext context = new AnalysisRequestContext(
+        final String sanitizedInput = inputText.trim();
+        final AnalysisRequestContext context = new AnalysisRequestContext(
                 sanitizedInput,
                 TextNormalizer.normalize(sanitizedInput)
         );
 
-        RuleMatch bestMatch = selectBestMatch(context);
-        AnalysisResult result = new AnalysisResult(
+        final List<RuleMatch> matchedRules = findMatchedRules(context);
+        final RuleMatch bestMatch = matchedRules.isEmpty()
+                ? buildFallbackMatch()
+                : selectBestMatch(matchedRules);
+
+        final AnalysisResult result = new AnalysisResult(
                 UUID.randomUUID(),
                 OffsetDateTime.now(clock),
                 bestMatch.category(),
@@ -58,7 +70,10 @@ public class AnalysisServiceImpl implements AnalysisService {
                 bestMatch.probableCause(),
                 bestMatch.detectedPatterns(),
                 bestMatch.recommendedSteps(),
-                ScoreUtils.toBigDecimal(bestMatch.score())
+                ScoreUtils.toBigDecimal(bestMatch.score()),
+                bestMatch.ruleCode(),
+                sanitizedInput.length(),
+                matchedRules.size()
         );
 
         analysisRecordRepository.save(analysisRecordMapper.toEntity(sanitizedInput, result));
@@ -66,15 +81,36 @@ public class AnalysisServiceImpl implements AnalysisService {
         return result;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public AnalysisResult getAnalysisById(final UUID analysisId) {
+        return analysisRecordRepository.findById(analysisId)
+                .map(analysisRecordMapper::toModel)
+                .orElseThrow(() -> new AnalysisNotFoundException(analysisId));
+    }
 
-    private RuleMatch selectBestMatch(AnalysisRequestContext context) {
+    @Override
+    @Transactional(readOnly = true)
+    public List<AnalysisResult> getAllAnalyses() {
+        return analysisRecordRepository.findAllByOrderByAnalyzedAtDesc()
+                .stream()
+                .map(analysisRecordMapper::toModel)
+                .toList();
+    }
+
+    private List<RuleMatch> findMatchedRules(final AnalysisRequestContext context) {
         return rules.stream()
                 .map(rule -> rule.evaluate(context))
-                .filter(match -> match.score() > 0.0)
+                .filter(match -> match != null && match.score() > 0.0)
+                .toList();
+    }
+
+    private RuleMatch selectBestMatch(final List<RuleMatch> matches) {
+        return matches.stream()
                 .max(Comparator
                         .comparingDouble(RuleMatch::score)
                         .thenComparing(match -> severityPriority(match.severity())))
-                .orElseGet(this::buildFallbackMatch);
+                .orElseThrow(() -> new IllegalStateException("No rule match available to select"));
     }
 
     private RuleMatch buildFallbackMatch() {
@@ -93,7 +129,7 @@ public class AnalysisServiceImpl implements AnalysisService {
         );
     }
 
-    private int severityPriority(Severity severity) {
+    private int severityPriority(final Severity severity) {
         return switch (severity) {
             case LOW -> 1;
             case MEDIUM -> 2;
@@ -101,5 +137,4 @@ public class AnalysisServiceImpl implements AnalysisService {
             case CRITICAL -> 4;
         };
     }
-
 }
