@@ -1,17 +1,31 @@
 package com.rootcause.config;
 
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
 import java.time.Clock;
 
+/**
+ * Spring configuration class for application-wide infrastructure beans.
+ *
+ * <p>This configuration currently provides a shared {@link Clock} bean to centralize
+ * time access across the application.</p>
+ *
+ * <p>Using a single clock bean improves consistency in time-based operations and avoids
+ * coupling the code to the default system clock directly. It also makes testing easier,
+ * because the clock can be replaced or controlled in test scenarios.</p>
+ *
+ * <p>The configured clock uses UTC so that persisted timestamps and time-based logic do not
+ * depend on the server local timezone.</p>
+ */
 @Configuration
 public class ApplicationConfig {
-    /*
-    * Esta clase se encarga de configurar los beans necesarios para la aplicación. En este caso, se define un bean de tipo Clock que se utiliza para obtener la hora actual en formato UTC.
-    * Esto es útil para garantizar que todas las operaciones relacionadas con el tiempo sean consistentes y
-    * no dependan de la zona horaria del servidor donde se ejecute la aplicación.
-    * */
 
+    /**
+     * Creates the application clock bean using the UTC timezone.
+     *
+     * @return shared UTC clock instance
+     */
     @Bean
     public Clock clock() {
         return Clock.systemUTC();

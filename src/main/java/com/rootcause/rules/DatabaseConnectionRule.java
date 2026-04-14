@@ -8,10 +8,27 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+/**
+ * Rule that detects database connection failures.
+ *
+ * <p>This rule identifies situations where the application cannot establish
+ * a connection to the target database.</p>
+ *
+ * <p>Typical causes include an unreachable database server, incorrect connection
+ * parameters, invalid credentials, network connectivity problems, or issues in
+ * the JDBC connection configuration.</p>
+ *
+ * <p>The rule is registered as a Spring component and participates in the
+ * ordered rule evaluation pipeline with priority {@code 10}.</p>
+ */
 @Component
 @Order(10)
 public class DatabaseConnectionRule extends BasePatternRule {
 
+    /**
+     * Creates the database connection rule with its fixed metadata, supported patterns,
+     * recommended remediation steps, and base score.
+     */
     public DatabaseConnectionRule() {
         super(
                 "database-connection-rule",
@@ -29,6 +46,14 @@ public class DatabaseConnectionRule extends BasePatternRule {
         );
     }
 
+    /**
+     * Defines the database-connection-related patterns supported by this rule.
+     *
+     * <p>The returned map preserves insertion order so pattern evaluation remains
+     * deterministic when the parent rule processes them.</p>
+     *
+     * @return ordered map of human-readable pattern labels and their regex expressions
+     */
     private static LinkedHashMap<String, String> patterns() {
         LinkedHashMap<String, String> patterns = new LinkedHashMap<>();
         patterns.put("connection refused", "connection\\s+refused");

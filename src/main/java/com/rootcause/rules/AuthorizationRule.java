@@ -8,10 +8,27 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+/**
+ * Rule that detects authorization-related failures.
+ *
+ * <p>This rule identifies situations where the caller is authenticated, or at least
+ * partially identified, but does not have sufficient permissions to perform the
+ * requested operation.</p>
+ *
+ * <p>Typical cases include forbidden access, missing privileges, denied operations,
+ * and permission model mismatches between the caller and the protected resource.</p>
+ *
+ * <p>The rule is registered as a Spring component and participates in the
+ * ordered rule evaluation pipeline with priority {@code 30}.</p>
+ */
 @Component
 @Order(30)
 public class AuthorizationRule extends BasePatternRule {
 
+    /**
+     * Creates the authorization rule with its fixed metadata, supported patterns,
+     * recommended remediation steps, and base score.
+     */
     public AuthorizationRule() {
         super(
                 "authorization-rule",
@@ -29,6 +46,14 @@ public class AuthorizationRule extends BasePatternRule {
         );
     }
 
+    /**
+     * Defines the authorization-related patterns supported by this rule.
+     *
+     * <p>The returned map preserves insertion order so pattern evaluation remains
+     * deterministic when the parent rule processes them.</p>
+     *
+     * @return ordered map of human-readable pattern labels and their regex expressions
+     */
     private static LinkedHashMap<String, String> patterns() {
         LinkedHashMap<String, String> patterns = new LinkedHashMap<>();
         patterns.put("access denied", "access\\s+denied");

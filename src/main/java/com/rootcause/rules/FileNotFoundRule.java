@@ -8,10 +8,27 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+/**
+ * Rule that detects file-not-found-related failures.
+ *
+ * <p>This rule identifies situations where the application attempts to access
+ * a file or path that is not available at runtime.</p>
+ *
+ * <p>Typical causes include missing files, incorrect paths, misspelled filenames,
+ * wrong working-directory assumptions, or missing mounted volumes in containerized
+ * or deployed environments.</p>
+ *
+ * <p>The rule is registered as a Spring component and participates in the
+ * ordered rule evaluation pipeline with priority {@code 100}.</p>
+ */
 @Component
 @Order(100)
 public class FileNotFoundRule extends BasePatternRule {
 
+    /**
+     * Creates the file-not-found rule with its fixed metadata, supported patterns,
+     * recommended remediation steps, and base score.
+     */
     public FileNotFoundRule() {
         super(
                 "file-not-found-rule",
@@ -29,6 +46,14 @@ public class FileNotFoundRule extends BasePatternRule {
         );
     }
 
+    /**
+     * Defines the file-not-found-related patterns supported by this rule.
+     *
+     * <p>The returned map preserves insertion order so pattern evaluation remains
+     * deterministic when the parent rule processes them.</p>
+     *
+     * @return ordered map of human-readable pattern labels and their regex expressions
+     */
     private static LinkedHashMap<String, String> patterns() {
         LinkedHashMap<String, String> patterns = new LinkedHashMap<>();
         patterns.put("FileNotFoundException", "filenotfoundexception");

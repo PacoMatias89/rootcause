@@ -8,10 +8,26 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+/**
+ * Rule that detects SQL-related failures.
+ *
+ * <p>This rule identifies situations where an SQL statement or a database interaction
+ * fails during execution.</p>
+ *
+ * <p>Typical causes include malformed SQL, schema mismatches, missing tables or columns,
+ * invalid SQL grammar, incorrect parameter binding, or vendor-specific SQL errors.</p>
+ *
+ * <p>The rule is registered as a Spring component and participates in the
+ * ordered rule evaluation pipeline with priority {@code 90}.</p>
+ */
 @Component
 @Order(90)
 public class SqlErrorRule extends BasePatternRule {
 
+    /**
+     * Creates the SQL error rule with its fixed metadata, supported patterns,
+     * recommended remediation steps, and base score.
+     */
     public SqlErrorRule() {
         super(
                 "sql-error-rule",
@@ -29,6 +45,14 @@ public class SqlErrorRule extends BasePatternRule {
         );
     }
 
+    /**
+     * Defines the SQL-related patterns supported by this rule.
+     *
+     * <p>The returned map preserves insertion order so pattern evaluation remains
+     * deterministic when the parent rule processes them.</p>
+     *
+     * @return ordered map of human-readable pattern labels and their regex expressions
+     */
     private static LinkedHashMap<String, String> patterns() {
         LinkedHashMap<String, String> patterns = new LinkedHashMap<>();
         patterns.put("SQLSyntaxErrorException", "sqlsyntaxerrorexception");
