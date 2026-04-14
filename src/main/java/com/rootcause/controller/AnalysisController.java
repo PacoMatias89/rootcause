@@ -1,11 +1,14 @@
 package com.rootcause.controller;
 
+import com.rootcause.dto.AnalysisPageResponse;
 import com.rootcause.dto.AnalysisSummaryResponse;
 import com.rootcause.dto.AnalyzeRequest;
 import com.rootcause.dto.AnalyzeResponse;
 import com.rootcause.mapper.AnalysisResponseMapper;
+import com.rootcause.model.AnalysisResult;
 import com.rootcause.service.AnalysisService;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -80,19 +83,48 @@ public class AnalysisController {
     }
 
     /**
-     * Retrieves all stored analyses as summary responses ordered by the service layer.
+     * Retrieves stored analyses using optional filters and paginated access.
      *
-     * <p>This endpoint is intended for history or listing views where a compact response
-     * is more appropriate than returning the full analysis detail for every record.</p>
+     * <p>Supported optional filters are {@code category}, {@code severity}, and
+     * {@code ruleCode}. Results are returned ordered from newest to oldest.</p>
      *
-     * @return list of stored analyses represented as summary DTOs
+     * @param category optional category filter
+     * @param severity optional severity filter
+     * @param ruleCode optional rule-code filter
+     * @param page zero-based page index
+     * @param size requested page size
+     * @return paginated response containing matching analysis summaries
      */
     @GetMapping("/analyses")
     @ResponseStatus(HttpStatus.OK)
-    public List<AnalysisSummaryResponse> getAllAnalyses() {
-        return analysisService.getAllAnalyses()
+    public AnalysisPageResponse getAllAnalyses(
+            @RequestParam(value = "category", required = false) final String category,
+            @RequestParam(value = "severity", required = false) final String severity,
+            @RequestParam(value = "ruleCode", required = false) final String ruleCode,
+            @RequestParam(value = "page", defaultValue = "0") final int page,
+            @RequestParam(value = "size", defaultValue = "20") final int size
+    ) {
+        final Page<AnalysisResult> resultPage = analysisService.getAnalyses(
+                category,
+                severity,
+                ruleCode,
+                page,
+                size
+        );
+
+        final List<AnalysisSummaryResponse> items = resultPage.getContent()
                 .stream()
                 .map(analysisResponseMapper::toSummaryResponse)
                 .toList();
+
+        return new AnalysisPageResponse(
+                items,
+                resultPage.getNumber(),
+                resultPage.getSize(),
+                resultPage.getTotalElements(),
+                resultPage.getTotalPages(),
+                resultPage.isFirst(),
+                resultPage.isLast()
+        );
     }
 }

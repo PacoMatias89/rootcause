@@ -1,6 +1,7 @@
 package com.rootcause.service;
 
 import com.rootcause.model.AnalysisResult;
+import org.springframework.data.domain.Page;
 
 import java.util.List;
 import java.util.UUID;
@@ -24,7 +25,33 @@ public interface AnalysisService {
 
     AnalysisResult analyze(String inputText);
 
+
+    /**
+     * Retrieves a previously stored analysis by its identifier.
+     *
+     * @param analysisId unique identifier of the analysis to retrieve
+     * @return stored analysis result
+     */
+
     AnalysisResult getAnalysisById(UUID analysisId);
 
+    /**
+     * Retrieves all stored analyses ordered from newest to oldest.
+     *
+     * @return list of stored analyses
+     */
+
     List<AnalysisResult> getAllAnalyses();
+    /**
+     * Retrieves stored analyses using optional filters and paginated access.
+     *
+     * @param category optional category filter
+     * @param severity optional severity filter
+     * @param ruleCode optional rule-code filter
+     * @param page zero-based page index
+     * @param size requested page size
+     * @return page of stored analyses that match the provided filters
+     */
+
+    Page<AnalysisResult> getAnalyses(String category, String severity, String ruleCode, int page, int size);
 }

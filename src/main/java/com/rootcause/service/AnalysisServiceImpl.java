@@ -1,5 +1,6 @@
 package com.rootcause.service;
 
+import com.rootcause.entity.AnalysisRecordEntity;
 import com.rootcause.exception.AnalysisNotFoundException;
 import com.rootcause.mapper.AnalysisRecordMapper;
 import com.rootcause.model.AnalysisRequestContext;
@@ -8,9 +9,15 @@ import com.rootcause.model.ErrorCategory;
 import com.rootcause.model.RuleMatch;
 import com.rootcause.model.Severity;
 import com.rootcause.repository.AnalysisRecordRepository;
+import com.rootcause.repository.AnalysisRecordSpecifications;
 import com.rootcause.rules.AnalysisRule;
 import com.rootcause.util.ScoreUtils;
 import com.rootcause.util.TextNormalizer;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +48,8 @@ import java.util.UUID;
  */
 @Service
 public class AnalysisServiceImpl implements AnalysisService {
+
+    private static final int DEFAULT_PAGE_SIZE_LIMIT = 100;
 
     private final List<AnalysisRule> rules;
     private final AnalysisRecordRepository analysisRecordRepository;
@@ -151,6 +160,68 @@ public class AnalysisServiceImpl implements AnalysisService {
                 .stream()
                 .map(analysisRecordMapper::toModel)
                 .toList();
+    }
+
+
+    /**
+     * Retrieves stored analyses using optional filters and paginated access.
+     *
+     * <p>The results are always ordered by {@code analyzedAt} descending so the newest
+     * analyses appear first.</p>
+     *
+     * @param category optional category filter
+     * @param severity optional severity filter
+     * @param ruleCode optional rule-code filter
+     * @param page zero-based page index
+     * @param size requested page size
+     * @return page of stored analyses matching the provided criteria
+     * @throws IllegalArgumentException when page or size are invalid
+     */
+    @Override
+    public Page<AnalysisResult> getAnalyses(String category,
+                                               String severity,
+                                               String ruleCode,
+                                               int page,
+                                               int size) {
+        validationPagination(page,size);
+
+        final Pageable pageable = PageRequest.of(
+                page,
+                size,
+                Sort.by(Sort.Direction.DESC, "analyzedAt")
+        );
+
+        final Specification<AnalysisRecordEntity> specification = Specification.allOf(
+                AnalysisRecordSpecifications.hasCategory(category),
+                AnalysisRecordSpecifications.hasSeverity(severity),
+                AnalysisRecordSpecifications.hasRuleCode(ruleCode)
+        );
+
+        return analysisRecordRepository.findAll(specification, pageable)
+                .map(analysisRecordMapper::toModel);
+    }
+
+
+    /**
+     * Validates pagination parameters accepted by the history endpoint.
+     *
+     * @param page zero-based page index
+     * @param size requested page size
+     * @throws IllegalArgumentException when values are outside the accepted range
+     */
+
+    private void validationPagination(final int page, final int size) {
+        if (page < 0) {
+            throw new IllegalArgumentException("page must be greater than or equal to zero");
+        }
+
+        if(size <= 0) {
+            throw new IllegalArgumentException("size must be greater than zero");
+        }
+
+        if (size > DEFAULT_PAGE_SIZE_LIMIT){
+            throw new IllegalArgumentException("size must be greater than or equal to 100");
+        }
     }
 
     /**
