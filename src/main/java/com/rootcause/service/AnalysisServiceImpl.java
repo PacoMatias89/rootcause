@@ -23,9 +23,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Default implementation of {@link AnalysisService}.
@@ -178,12 +180,17 @@ public class AnalysisServiceImpl implements AnalysisService {
      * @throws IllegalArgumentException when page or size are invalid
      */
     @Override
-    public Page<AnalysisResult> getAnalyses(String category,
-                                               String severity,
-                                               String ruleCode,
-                                               int page,
-                                               int size) {
-        validationPagination(page,size);
+    @Transactional(readOnly = true)
+    public Page<AnalysisResult> getAnalyses(
+            final String category,
+            final String severity,
+            final String ruleCode,
+            final int page,
+            final int size
+    ) {
+        validatePagination(page, size);
+        validateCategoryFilter(category);
+        validateSeverityFilter(severity);
 
         final Pageable pageable = PageRequest.of(
                 page,
@@ -210,7 +217,7 @@ public class AnalysisServiceImpl implements AnalysisService {
      * @throws IllegalArgumentException when values are outside the accepted range
      */
 
-    private void validationPagination(final int page, final int size) {
+    private void validatePagination(final int page, final int size) {
         if (page < 0) {
             throw new IllegalArgumentException("page must be greater than or equal to zero");
         }
@@ -295,4 +302,78 @@ public class AnalysisServiceImpl implements AnalysisService {
             case CRITICAL -> 4;
         };
     }
+
+    /**
+     * Returns the comma-separated list of supported category values accepted by the API.
+     *
+     * @return supported category names in enum declaration order
+     */
+
+    private String getAllowedCategory(){
+        return Arrays.stream(ErrorCategory.values())
+                .map(ErrorCategory::name)
+                .collect(Collectors.joining(", "));
+    }
+
+
+    /**
+     * Returns the comma-separated list of supported severity values accepted by the API.
+     *
+     * @return supported severity names in enum declaration order
+     */
+
+    private String getAllowedSeverity(){
+        return Arrays.stream(Severity.values())
+                .map(Severity::name)
+                .collect(Collectors.joining(", "));
+    }
+
+    /**
+     * Validates the optional category filter used in historical searches.
+     *
+     * <p>Blank values are treated as absent filters and therefore accepted.</p>
+     *
+     * @param category optional category filter received from the caller
+     * @throws IllegalArgumentException when the provided value does not match any supported
+     *                                  {@link ErrorCategory} name
+     */
+    private void validateCategoryFilter(final String category) {
+        if (category == null || category.isBlank()) {
+            return;
+        }
+
+        try {
+            ErrorCategory.valueOf(category);
+        } catch (final IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                    "category must be one of: " + getAllowedCategory()
+            );
+        }
+    }
+
+    /**
+     * Validates the optional severity filter used in historical searches.
+     *
+     * <p>Blank values are treated as absent filters and therefore accepted.</p>
+     *
+     * @param severity optional severity filter received from the caller
+     * @throws IllegalArgumentException when the provided value does not match any supported
+     *                                  {@link Severity} name
+     */
+    private void validateSeverityFilter(final String severity) {
+        if (severity == null || severity.isBlank()) {
+            return;
+        }
+
+        try {
+            Severity.valueOf(severity);
+        } catch (final IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                    "severity must be one of: " + getAllowedSeverity()
+            );
+        }
+    }
+
+
+
 }
