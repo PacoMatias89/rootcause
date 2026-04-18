@@ -3,11 +3,8 @@ package com.rootcause.service;
 import com.rootcause.entity.AnalysisRecordEntity;
 import com.rootcause.exception.AnalysisNotFoundException;
 import com.rootcause.mapper.AnalysisRecordMapper;
-import com.rootcause.model.AnalysisDecision;
-import com.rootcause.model.AnalysisRequestContext;
-import com.rootcause.model.AnalysisResult;
-import com.rootcause.model.ErrorCategory;
-import com.rootcause.model.Severity;
+import com.rootcause.model.*;
+import com.rootcause.repository.AnalysisGroupedCountProjection;
 import com.rootcause.repository.AnalysisRecordRepository;
 import com.rootcause.repository.AnalysisRecordSpecifications;
 import com.rootcause.util.ScoreUtils;
@@ -198,6 +195,44 @@ public class AnalysisServiceImpl implements AnalysisService {
 
         return analysisRecordRepository.findAll(specification, pageable)
                 .map(analysisRecordMapper::toModel);
+    }
+    /**
+     * Converts a grouped count projection into the internal grouped count model.
+     *
+     * @param projection grouped count projection
+     * @return internal grouped count model
+     */
+    private AnalysisCount toAnalysisCount(final AnalysisGroupedCountProjection projection) {
+        return new AnalysisCount(
+                projection.getValue(),
+                projection.getCount()
+        );
+    }
+    /**
+     * Retrieves aggregated statistics for persisted analyses.
+     *
+     * @return aggregated analysis statistics
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public AnalysisStats getAnalysisStats() {
+        final long totalAnalyses = analysisRecordRepository.count();
+
+        final List<AnalysisCount> byCategory = analysisRecordRepository.countGroupedByCategory()
+                .stream()
+                .map(this::toAnalysisCount)
+                .toList();
+
+        final List<AnalysisCount> bySeverity = analysisRecordRepository.countGroupedBySeverity()
+                .stream()
+                .map(this::toAnalysisCount)
+                .toList();
+
+        return new AnalysisStats(
+                totalAnalyses,
+                byCategory,
+                bySeverity
+        );
     }
 
     /**

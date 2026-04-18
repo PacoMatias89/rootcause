@@ -1,11 +1,10 @@
 package com.rootcause.controller;
 
-import com.rootcause.dto.AnalysisPageResponse;
-import com.rootcause.dto.AnalysisSummaryResponse;
-import com.rootcause.dto.AnalyzeRequest;
-import com.rootcause.dto.AnalyzeResponse;
+import com.rootcause.dto.*;
 import com.rootcause.mapper.AnalysisResponseMapper;
+import com.rootcause.mapper.AnalysisStatsResponseMapper;
 import com.rootcause.model.AnalysisResult;
+import com.rootcause.model.AnalysisStats;
 import com.rootcause.service.AnalysisService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
@@ -35,6 +34,7 @@ public class AnalysisController {
 
     private final AnalysisService analysisService;
     private final AnalysisResponseMapper analysisResponseMapper;
+    private final AnalysisStatsResponseMapper analysisStatsResponseMapper;
 
     /**
      * Creates the controller with its required collaborators.
@@ -44,10 +44,13 @@ public class AnalysisController {
      */
     public AnalysisController(
             final AnalysisService analysisService,
-            final AnalysisResponseMapper analysisResponseMapper
+            final AnalysisResponseMapper analysisResponseMapper,
+            final AnalysisStatsResponseMapper analysisStatsResponseMapper
+
     ) {
         this.analysisService = analysisService;
         this.analysisResponseMapper = analysisResponseMapper;
+        this.analysisStatsResponseMapper = analysisStatsResponseMapper;
     }
 
     /**
@@ -126,5 +129,20 @@ public class AnalysisController {
                 resultPage.isFirst(),
                 resultPage.isLast()
         );
+    }
+
+
+    /**
+     * Retrieves aggregated statistics for persisted analyses.
+     *
+     * @return aggregated analysis statistics response
+     */
+
+    @GetMapping("analyses/stats")
+    @ResponseStatus(HttpStatus.OK)
+    public AnalysisStatsResponse getAnalysisStats(){
+        final AnalysisStats stats = analysisService.getAnalysisStats();
+
+        return analysisStatsResponseMapper.toResponse(stats);
     }
 }

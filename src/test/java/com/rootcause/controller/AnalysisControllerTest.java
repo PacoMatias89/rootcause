@@ -3,7 +3,10 @@ package com.rootcause.controller;
 import com.rootcause.exception.AnalysisNotFoundException;
 import com.rootcause.exception.GlobalExceptionHandler;
 import com.rootcause.mapper.AnalysisResponseMapper;
+import com.rootcause.mapper.AnalysisStatsResponseMapper;
+import com.rootcause.model.AnalysisCount;
 import com.rootcause.model.AnalysisResult;
+import com.rootcause.model.AnalysisStats;
 import com.rootcause.model.ErrorCategory;
 import com.rootcause.model.Severity;
 import com.rootcause.service.AnalysisService;
@@ -32,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(AnalysisController.class)
-@Import({GlobalExceptionHandler.class, AnalysisResponseMapper.class})
+@Import({GlobalExceptionHandler.class, AnalysisResponseMapper.class, AnalysisStatsResponseMapper.class})
 class AnalysisControllerTest {
 
     @Autowired
@@ -208,6 +211,34 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.size").value(10))
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/analyses/stats should return aggregated statistics")
+    void shouldGetAnalysisStatsSuccessfully() throws Exception {
+        final AnalysisStats stats = new AnalysisStats(
+                6L,
+                List.of(
+                        new AnalysisCount("DATABASE_CONNECTION", 3L),
+                        new AnalysisCount("TIMEOUT", 2L),
+                        new AnalysisCount("NULL_POINTER", 1L)
+                ),
+                List.of(
+                        new AnalysisCount("CRITICAL", 3L),
+                        new AnalysisCount("HIGH", 2L),
+                        new AnalysisCount("MEDIUM", 1L)
+                )
+        );
+
+        when(analysisService.getAnalysisStats()).thenReturn(stats);
+
+        mockMvc.perform(get("/api/v1/analyses/stats"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalAnalyses").value(6))
+                .andExpect(jsonPath("$.byCategory[0].value").value("DATABASE_CONNECTION"))
+                .andExpect(jsonPath("$.byCategory[0].count").value(3))
+                .andExpect(jsonPath("$.bySeverity[0].value").value("CRITICAL"))
+                .andExpect(jsonPath("$.bySeverity[0].count").value(3));
     }
 
     @Test

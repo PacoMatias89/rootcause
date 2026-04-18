@@ -1,6 +1,7 @@
 package com.rootcause.service;
 
 import com.rootcause.model.AnalysisResult;
+import com.rootcause.model.AnalysisStats;
 import org.springframework.data.domain.Page;
 
 import java.util.List;
@@ -54,4 +55,11 @@ public interface AnalysisService {
      */
 
     Page<AnalysisResult> getAnalyses(String category, String severity, String ruleCode, int page, int size);
+
+    /**
+     * Retrieves aggregated statistics for persisted analyses.
+     *
+     * @return aggregated analysis statistics
+     */
+    AnalysisStats getAnalysisStats();
 }

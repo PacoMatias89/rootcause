@@ -6,9 +6,11 @@ import com.rootcause.mapper.AnalysisRecordMapper;
 import com.rootcause.model.AnalysisDecision;
 import com.rootcause.model.AnalysisRequestContext;
 import com.rootcause.model.AnalysisResult;
+import com.rootcause.model.AnalysisStats;
 import com.rootcause.model.ErrorCategory;
 import com.rootcause.model.RuleMatch;
 import com.rootcause.model.Severity;
+import com.rootcause.repository.AnalysisGroupedCountProjection;
 import com.rootcause.repository.AnalysisRecordRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +42,7 @@ import static org.mockito.Mockito.when;
  *
  * <p>These tests verify the application service responsibilities such as input validation,
  * orchestration of the analysis flow, persistence interaction, historical retrieval,
- * and filter validation.</p>
+ * statistics retrieval, and filter validation.</p>
  */
 class AnalysisServiceImplTest {
 
@@ -303,6 +305,39 @@ class AnalysisServiceImplTest {
     }
 
     @Test
+    @DisplayName("Should return aggregated analysis statistics")
+    void shouldReturnAggregatedAnalysisStatistics() {
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
+        );
+
+        when(analysisRecordRepository.count()).thenReturn(6L);
+        when(analysisRecordRepository.countGroupedByCategory()).thenReturn(List.of(
+                new TestAnalysisGroupedCountProjection("DATABASE_CONNECTION", 3L),
+                new TestAnalysisGroupedCountProjection("TIMEOUT", 2L),
+                new TestAnalysisGroupedCountProjection("NULL_POINTER", 1L)
+        ));
+        when(analysisRecordRepository.countGroupedBySeverity()).thenReturn(List.of(
+                new TestAnalysisGroupedCountProjection("CRITICAL", 3L),
+                new TestAnalysisGroupedCountProjection("HIGH", 2L),
+                new TestAnalysisGroupedCountProjection("MEDIUM", 1L)
+        ));
+
+        final AnalysisStats stats = service.getAnalysisStats();
+
+        assertEquals(6L, stats.totalAnalyses());
+        assertEquals(3, stats.byCategory().size());
+        assertEquals("DATABASE_CONNECTION", stats.byCategory().get(0).value());
+        assertEquals(3L, stats.byCategory().get(0).count());
+        assertEquals(3, stats.bySeverity().size());
+        assertEquals("CRITICAL", stats.bySeverity().get(0).value());
+        assertEquals(3L, stats.bySeverity().get(0).count());
+    }
+
+    @Test
     @DisplayName("Should reject invalid category filter")
     void shouldRejectInvalidCategoryFilter() {
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
@@ -398,5 +433,26 @@ class AnalysisServiceImplTest {
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.analyze("   "));
+    }
+
+    private static final class TestAnalysisGroupedCountProjection implements AnalysisGroupedCountProjection {
+
+        private final String value;
+        private final long count;
+
+        private TestAnalysisGroupedCountProjection(final String value, final long count) {
+            this.value = value;
+            this.count = count;
+        }
+
+        @Override
+        public String getValue() {
+            return value;
+        }
+
+        @Override
+        public long getCount() {
+            return count;
+        }
     }
 }
