@@ -3,12 +3,13 @@ package com.rootcause.service;
 import com.rootcause.entity.AnalysisRecordEntity;
 import com.rootcause.exception.AnalysisNotFoundException;
 import com.rootcause.mapper.AnalysisRecordMapper;
+import com.rootcause.model.AnalysisDecision;
+import com.rootcause.model.AnalysisRequestContext;
 import com.rootcause.model.AnalysisResult;
 import com.rootcause.model.ErrorCategory;
 import com.rootcause.model.RuleMatch;
 import com.rootcause.model.Severity;
 import com.rootcause.repository.AnalysisRecordRepository;
-import com.rootcause.rules.AnalysisRule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -34,33 +35,39 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * Unit tests for {@link AnalysisServiceImpl}.
+ *
+ * <p>These tests verify the application service responsibilities such as input validation,
+ * orchestration of the analysis flow, persistence interaction, historical retrieval,
+ * and filter validation.</p>
+ */
 class AnalysisServiceImplTest {
 
+    private AnalysisEngine analysisEngine;
     private AnalysisRecordRepository analysisRecordRepository;
     private AnalysisRecordMapper analysisRecordMapper;
     private Clock clock;
 
     @BeforeEach
     void setUp() {
+        analysisEngine = mock(AnalysisEngine.class);
         analysisRecordRepository = mock(AnalysisRecordRepository.class);
         analysisRecordMapper = new AnalysisRecordMapper();
         clock = Clock.fixed(Instant.parse("2026-04-13T10:15:30Z"), ZoneOffset.UTC);
     }
 
     @Test
-    @DisplayName("Should analyze input and persist metadata from best rule")
-    void shouldAnalyzeInputAndPersistMetadataFromBestRule() {
-        final AnalysisRule weakerRule = context -> new RuleMatch(
-                "sql-error-rule",
-                ErrorCategory.SQL_ERROR,
-                Severity.HIGH,
-                0.55,
-                "Generic SQL issue detected.",
-                List.of("sql exception"),
-                List.of("Review SQL statement")
+    @DisplayName("Should analyze input and persist metadata from engine decision")
+    void shouldAnalyzeInputAndPersistMetadataFromEngineDecision() {
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
         );
 
-        final AnalysisRule strongerRule = context -> new RuleMatch(
+        final RuleMatch bestMatch = new RuleMatch(
                 "database-connection-rule",
                 ErrorCategory.DATABASE_CONNECTION,
                 Severity.CRITICAL,
@@ -70,12 +77,8 @@ class AnalysisServiceImplTest {
                 List.of("Verify database availability", "Check datasource configuration")
         );
 
-        final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(weakerRule, strongerRule),
-                analysisRecordRepository,
-                analysisRecordMapper,
-                clock
-        );
+        when(analysisEngine.analyze(any(AnalysisRequestContext.class)))
+                .thenReturn(new AnalysisDecision(bestMatch, 2));
 
         when(analysisRecordRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -93,28 +96,32 @@ class AnalysisServiceImplTest {
         assertEquals(Integer.valueOf(2), result.matchedRuleCount());
         assertEquals(0, result.confidence().compareTo(new BigDecimal("0.80")));
 
+        verify(analysisEngine, times(1)).analyze(any(AnalysisRequestContext.class));
         verify(analysisRecordRepository, times(1)).save(any());
     }
 
     @Test
-    @DisplayName("Should use fallback when no rule matches")
-    void shouldUseFallbackWhenNoRuleMatches() {
-        final AnalysisRule noMatchRule = context -> new RuleMatch(
-                "some-rule",
-                ErrorCategory.TIMEOUT,
-                Severity.MEDIUM,
-                0.0,
-                "No effective match",
-                List.of(),
-                List.of()
-        );
-
+    @DisplayName("Should persist fallback result when engine returns unknown diagnosis")
+    void shouldPersistFallbackResultWhenEngineReturnsUnknownDiagnosis() {
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(noMatchRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
         );
+
+        final RuleMatch fallbackMatch = new RuleMatch(
+                "unknown-fallback-rule",
+                ErrorCategory.UNKNOWN,
+                Severity.LOW,
+                0.15,
+                "The input does not match any known rule strongly enough.",
+                List.of("no strong rule match"),
+                List.of("Provide more technical context")
+        );
+
+        when(analysisEngine.analyze(any(AnalysisRequestContext.class)))
+                .thenReturn(new AnalysisDecision(fallbackMatch, 0));
 
         when(analysisRecordRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -128,6 +135,7 @@ class AnalysisServiceImplTest {
         assertEquals(Integer.valueOf(0), result.matchedRuleCount());
         assertEquals(0, result.confidence().compareTo(new BigDecimal("0.15")));
 
+        verify(analysisEngine, times(1)).analyze(any(AnalysisRequestContext.class));
         verify(analysisRecordRepository, times(1)).save(any());
     }
 
@@ -153,18 +161,8 @@ class AnalysisServiceImplTest {
                 )
         );
 
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -188,18 +186,8 @@ class AnalysisServiceImplTest {
     void shouldThrowAnalysisNotFoundExceptionWhenAnalysisDoesNotExist() {
         final UUID analysisId = UUID.randomUUID();
 
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -247,18 +235,8 @@ class AnalysisServiceImplTest {
                 )
         );
 
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -299,18 +277,8 @@ class AnalysisServiceImplTest {
                 1
         );
 
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -337,18 +305,8 @@ class AnalysisServiceImplTest {
     @Test
     @DisplayName("Should reject invalid category filter")
     void shouldRejectInvalidCategoryFilter() {
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -367,18 +325,8 @@ class AnalysisServiceImplTest {
     @Test
     @DisplayName("Should reject invalid severity filter")
     void shouldRejectInvalidSeverityFilter() {
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -397,18 +345,8 @@ class AnalysisServiceImplTest {
     @Test
     @DisplayName("Should reject negative page")
     void shouldRejectNegativePage() {
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -422,18 +360,8 @@ class AnalysisServiceImplTest {
     @Test
     @DisplayName("Should reject non-positive size")
     void shouldRejectNonPositiveSize() {
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -447,18 +375,8 @@ class AnalysisServiceImplTest {
     @Test
     @DisplayName("Should reject size greater than allowed limit")
     void shouldRejectSizeGreaterThanAllowedLimit() {
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
@@ -472,36 +390,13 @@ class AnalysisServiceImplTest {
     @Test
     @DisplayName("Should reject blank input")
     void shouldRejectBlankInput() {
-        final AnalysisRule dummyRule = context -> new RuleMatch(
-                "dummy",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.1,
-                "dummy",
-                List.of(),
-                List.of()
-        );
-
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
-                List.of(dummyRule),
+                analysisEngine,
                 analysisRecordRepository,
                 analysisRecordMapper,
                 clock
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.analyze("   "));
-    }
-
-    @Test
-    @DisplayName("Should reject empty rule list in constructor")
-    void shouldRejectEmptyRuleListInConstructor() {
-        assertThrows(IllegalArgumentException.class, () ->
-                new AnalysisServiceImpl(
-                        List.of(),
-                        analysisRecordRepository,
-                        analysisRecordMapper,
-                        clock
-                )
-        );
     }
 }

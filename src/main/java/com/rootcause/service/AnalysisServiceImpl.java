@@ -3,14 +3,13 @@ package com.rootcause.service;
 import com.rootcause.entity.AnalysisRecordEntity;
 import com.rootcause.exception.AnalysisNotFoundException;
 import com.rootcause.mapper.AnalysisRecordMapper;
+import com.rootcause.model.AnalysisDecision;
 import com.rootcause.model.AnalysisRequestContext;
 import com.rootcause.model.AnalysisResult;
 import com.rootcause.model.ErrorCategory;
-import com.rootcause.model.RuleMatch;
 import com.rootcause.model.Severity;
 import com.rootcause.repository.AnalysisRecordRepository;
 import com.rootcause.repository.AnalysisRecordSpecifications;
-import com.rootcause.rules.AnalysisRule;
 import com.rootcause.util.ScoreUtils;
 import com.rootcause.util.TextNormalizer;
 import org.springframework.data.domain.Page;
@@ -24,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -32,28 +30,27 @@ import java.util.stream.Collectors;
 /**
  * Default implementation of {@link AnalysisService}.
  *
- * <p>This service coordinates the main RootCause business flow. It is responsible for:</p>
+ * <p>This service coordinates the main RootCause application flow. It is responsible for:</p>
  *
  * <ol>
  *     <li>validating the incoming raw text</li>
  *     <li>sanitizing and normalizing the input</li>
- *     <li>evaluating all configured {@link AnalysisRule} instances</li>
- *     <li>collecting the rules that match with a positive score</li>
- *     <li>selecting the strongest match using score and severity priority</li>
+ *     <li>delegating diagnosis generation to the configured {@link AnalysisEngine}</li>
  *     <li>building the internal {@link AnalysisResult}</li>
  *     <li>persisting the generated analysis</li>
  *     <li>retrieving previously stored analyses</li>
+ *     <li>validating pagination and filter parameters for historical queries</li>
  * </ol>
  *
- * <p>When no configured rule matches strongly enough, the service falls back to a predefined
- * low-confidence {@code UNKNOWN} diagnosis.</p>
+ * <p>The service acts as an application orchestrator and intentionally keeps diagnosis generation
+ * delegated to a dedicated engine so that future strategies can evolve without changing the public API.</p>
  */
 @Service
 public class AnalysisServiceImpl implements AnalysisService {
 
     private static final int DEFAULT_PAGE_SIZE_LIMIT = 100;
 
-    private final List<AnalysisRule> rules;
+    private final AnalysisEngine analysisEngine;
     private final AnalysisRecordRepository analysisRecordRepository;
     private final AnalysisRecordMapper analysisRecordMapper;
     private final Clock clock;
@@ -61,23 +58,18 @@ public class AnalysisServiceImpl implements AnalysisService {
     /**
      * Creates the service with all required collaborators.
      *
-     * @param rules configured analysis rules available in the application context
+     * @param analysisEngine engine responsible for producing the diagnostic decision
      * @param analysisRecordRepository repository used to persist and retrieve analysis records
      * @param analysisRecordMapper mapper used to convert between persistence entities and domain models
      * @param clock clock used to generate deterministic analysis timestamps
-     * @throws IllegalArgumentException when the rule list is {@code null} or empty
      */
     public AnalysisServiceImpl(
-            final List<AnalysisRule> rules,
+            final AnalysisEngine analysisEngine,
             final AnalysisRecordRepository analysisRecordRepository,
             final AnalysisRecordMapper analysisRecordMapper,
             final Clock clock
     ) {
-        if (rules == null || rules.isEmpty()) {
-            throw new IllegalArgumentException("At least one analysis rule must be configured");
-        }
-
-        this.rules = List.copyOf(rules);
+        this.analysisEngine = analysisEngine;
         this.analysisRecordRepository = analysisRecordRepository;
         this.analysisRecordMapper = analysisRecordMapper;
         this.clock = clock;
@@ -86,9 +78,8 @@ public class AnalysisServiceImpl implements AnalysisService {
     /**
      * Analyzes the provided raw input text and persists the generated result.
      *
-     * <p>The method trims the incoming text, creates a normalized analysis context, evaluates
-     * all configured rules, keeps the positively matched ones, chooses the best rule, and stores
-     * the resulting analysis in the database.</p>
+     * <p>The method trims the incoming text, creates a normalized analysis context, delegates the
+     * diagnostic decision to the analysis engine, and stores the resulting analysis in the database.</p>
      *
      * <p>The persisted result includes not only the final diagnosis but also metadata useful for
      * historical analysis, such as the matched rule code, the sanitized input length, and the
@@ -111,23 +102,20 @@ public class AnalysisServiceImpl implements AnalysisService {
                 TextNormalizer.normalize(sanitizedInput)
         );
 
-        final List<RuleMatch> matchedRules = findMatchedRules(context);
-        final RuleMatch bestMatch = matchedRules.isEmpty()
-                ? buildFallbackMatch()
-                : selectBestMatch(matchedRules);
+        final AnalysisDecision decision = analysisEngine.analyze(context);
 
         final AnalysisResult result = new AnalysisResult(
                 UUID.randomUUID(),
                 OffsetDateTime.now(clock),
-                bestMatch.category(),
-                bestMatch.severity(),
-                bestMatch.probableCause(),
-                bestMatch.detectedPatterns(),
-                bestMatch.recommendedSteps(),
-                ScoreUtils.toBigDecimal(bestMatch.score()),
-                bestMatch.ruleCode(),
+                decision.bestMatch().category(),
+                decision.bestMatch().severity(),
+                decision.bestMatch().probableCause(),
+                decision.bestMatch().detectedPatterns(),
+                decision.bestMatch().recommendedSteps(),
+                ScoreUtils.toBigDecimal(decision.bestMatch().score()),
+                decision.bestMatch().ruleCode(),
                 sanitizedInput.length(),
-                matchedRules.size()
+                decision.matchedRuleCount()
         );
 
         analysisRecordRepository.save(analysisRecordMapper.toEntity(sanitizedInput, result));
@@ -164,12 +152,15 @@ public class AnalysisServiceImpl implements AnalysisService {
                 .toList();
     }
 
-
     /**
      * Retrieves stored analyses using optional filters and paginated access.
      *
      * <p>The results are always ordered by {@code analyzedAt} descending so the newest
      * analyses appear first.</p>
+     *
+     * <p>When category or severity filters are provided, their values must match one of the
+     * supported enum names exactly. Invalid values are rejected explicitly instead of producing
+     * an empty result set.</p>
      *
      * @param category optional category filter
      * @param severity optional severity filter
@@ -177,7 +168,8 @@ public class AnalysisServiceImpl implements AnalysisService {
      * @param page zero-based page index
      * @param size requested page size
      * @return page of stored analyses matching the provided criteria
-     * @throws IllegalArgumentException when page or size are invalid
+     * @throws IllegalArgumentException when pagination is invalid or when category/severity
+     *                                  filters do not match supported values
      */
     @Override
     @Transactional(readOnly = true)
@@ -208,7 +200,6 @@ public class AnalysisServiceImpl implements AnalysisService {
                 .map(analysisRecordMapper::toModel);
     }
 
-
     /**
      * Validates pagination parameters accepted by the history endpoint.
      *
@@ -216,116 +207,18 @@ public class AnalysisServiceImpl implements AnalysisService {
      * @param size requested page size
      * @throws IllegalArgumentException when values are outside the accepted range
      */
-
     private void validatePagination(final int page, final int size) {
         if (page < 0) {
-            throw new IllegalArgumentException("page must be greater than or equal to zero");
+            throw new IllegalArgumentException("page must be greater than or equal to 0");
         }
 
-        if(size <= 0) {
-            throw new IllegalArgumentException("size must be greater than zero");
+        if (size <= 0) {
+            throw new IllegalArgumentException("size must be greater than 0");
         }
 
-        if (size > DEFAULT_PAGE_SIZE_LIMIT){
-            throw new IllegalArgumentException("size must be greater than or equal to 100");
+        if (size > DEFAULT_PAGE_SIZE_LIMIT) {
+            throw new IllegalArgumentException("size must be less than or equal to 100");
         }
-    }
-
-    /**
-     * Evaluates all configured rules and keeps only the matches with a positive score.
-     *
-     * <p>This method also protects against unexpected {@code null} matches returned by any rule.</p>
-     *
-     * @param context prepared analysis request context
-     * @return immutable list of positively matched rules
-     */
-    private List<RuleMatch> findMatchedRules(final AnalysisRequestContext context) {
-        return rules.stream()
-                .map(rule -> rule.evaluate(context))
-                .filter(match -> match != null && match.score() > 0.0)
-                .toList();
-    }
-
-    /**
-     * Selects the strongest rule from the provided matches.
-     *
-     * <p>The best match is determined first by highest score and, in case of a tie,
-     * by highest severity priority.</p>
-     *
-     * @param matches non-empty list of positive rule matches
-     * @return strongest available rule match
-     * @throws IllegalStateException when the list is empty
-     */
-    private RuleMatch selectBestMatch(final List<RuleMatch> matches) {
-        return matches.stream()
-                .max(Comparator
-                        .comparingDouble(RuleMatch::score)
-                        .thenComparing(match -> severityPriority(match.severity())))
-                .orElseThrow(() -> new IllegalStateException("No rule match available to select"));
-    }
-
-    /**
-     * Builds the fallback rule match used when no known rule matches the input strongly enough.
-     *
-     * @return fallback rule match with {@link ErrorCategory#UNKNOWN}, {@link Severity#LOW},
-     * and generic diagnostic recommendations
-     */
-    private RuleMatch buildFallbackMatch() {
-        return new RuleMatch(
-                "unknown-fallback-rule",
-                ErrorCategory.UNKNOWN,
-                Severity.LOW,
-                0.15,
-                "The input does not match any known rule strongly enough. This may be a new failure pattern or the provided text may be too short or too incomplete.",
-                List.of("no strong rule match"),
-                List.of(
-                        "Provide the full stack trace or a larger log excerpt.",
-                        "Include the first exception line and the most relevant caused-by section.",
-                        "Add technical context such as service name, environment, recent change, and timestamp."
-                )
-        );
-    }
-
-    /**
-     * Returns the numeric priority used to break ties between rule matches with the same score.
-     *
-     * <p>A higher severity implies a higher priority.</p>
-     *
-     * @param severity severity to rank
-     * @return numeric priority for tie-breaking purposes
-     */
-    private int severityPriority(final Severity severity) {
-        return switch (severity) {
-            case LOW -> 1;
-            case MEDIUM -> 2;
-            case HIGH -> 3;
-            case CRITICAL -> 4;
-        };
-    }
-
-    /**
-     * Returns the comma-separated list of supported category values accepted by the API.
-     *
-     * @return supported category names in enum declaration order
-     */
-
-    private String getAllowedCategory(){
-        return Arrays.stream(ErrorCategory.values())
-                .map(ErrorCategory::name)
-                .collect(Collectors.joining(", "));
-    }
-
-
-    /**
-     * Returns the comma-separated list of supported severity values accepted by the API.
-     *
-     * @return supported severity names in enum declaration order
-     */
-
-    private String getAllowedSeverity(){
-        return Arrays.stream(Severity.values())
-                .map(Severity::name)
-                .collect(Collectors.joining(", "));
     }
 
     /**
@@ -374,6 +267,25 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
     }
 
+    /**
+     * Returns the comma-separated list of supported category values accepted by the API.
+     *
+     * @return supported category names in enum declaration order
+     */
+    private String getAllowedCategory() {
+        return Arrays.stream(ErrorCategory.values())
+                .map(ErrorCategory::name)
+                .collect(Collectors.joining(", "));
+    }
 
-
+    /**
+     * Returns the comma-separated list of supported severity values accepted by the API.
+     *
+     * @return supported severity names in enum declaration order
+     */
+    private String getAllowedSeverity() {
+        return Arrays.stream(Severity.values())
+                .map(Severity::name)
+                .collect(Collectors.joining(", "));
+    }
 }
