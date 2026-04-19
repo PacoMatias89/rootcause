@@ -4,6 +4,7 @@ import com.rootcause.model.AnalysisResult;
 import com.rootcause.model.AnalysisStats;
 import org.springframework.data.domain.Page;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -54,7 +55,15 @@ public interface AnalysisService {
      * @return page of stored analyses that match the provided filters
      */
 
-    Page<AnalysisResult> getAnalyses(String category, String severity, String ruleCode, int page, int size);
+    Page<AnalysisResult> getAnalyses(
+            String category,
+            String severity,
+            String ruleCode,
+            OffsetDateTime analyzedFrom,
+            OffsetDateTime analyzedTo,
+            int page,
+            int size
+    );
 
     /**
      * Retrieves aggregated statistics for persisted analyses.

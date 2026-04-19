@@ -11,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -104,6 +105,8 @@ public class AnalysisController {
             @RequestParam(value = "category", required = false) final String category,
             @RequestParam(value = "severity", required = false) final String severity,
             @RequestParam(value = "ruleCode", required = false) final String ruleCode,
+            @RequestParam(value = "analyzedFrom", required = false) final OffsetDateTime analyzedFrom,
+            @RequestParam(value = "analyzedTo", required = false) final OffsetDateTime analyzedTo,
             @RequestParam(value = "page", defaultValue = "0") final int page,
             @RequestParam(value = "size", defaultValue = "20") final int size
     ) {
@@ -111,6 +114,8 @@ public class AnalysisController {
                 category,
                 severity,
                 ruleCode,
+                analyzedFrom,
+                analyzedTo,
                 page,
                 size
         );

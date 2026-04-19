@@ -34,9 +34,23 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Web MVC tests for {@link AnalysisController}.
+ *
+ * <p>These tests verify the public HTTP contract exposed by the analysis controller,
+ * including successful requests, paginated history retrieval, filter handling,
+ * statistics retrieval, and mapped error responses returned by the global exception
+ * handler.</p>
+ *
+ * <p>This test suite is intentionally focused on the controller layer contract and
+ * therefore mocks the application service.</p>
+ */
 @WebMvcTest(AnalysisController.class)
 @Import({GlobalExceptionHandler.class, AnalysisResponseMapper.class, AnalysisStatsResponseMapper.class})
 class AnalysisControllerTest {
+
+    private static final OffsetDateTime ANALYZED_FROM = OffsetDateTime.parse("2026-04-13T00:00:00Z");
+    private static final OffsetDateTime ANALYZED_TO = OffsetDateTime.parse("2026-04-19T23:59:59Z");
 
     @Autowired
     private MockMvc mockMvc;
@@ -44,6 +58,12 @@ class AnalysisControllerTest {
     @MockitoBean
     private AnalysisService analysisService;
 
+    /**
+     * Verifies that the analysis endpoint returns a successful diagnosis response
+     * when the input payload is valid.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("POST /api/v1/analyze should return analysis response")
     void shouldAnalyzeInputSuccessfully() throws Exception {
@@ -81,6 +101,11 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.confidence").value(0.80));
     }
 
+    /**
+     * Verifies that a stored analysis can be retrieved successfully by its identifier.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses/{id} should return stored analysis")
     void shouldGetAnalysisByIdSuccessfully() throws Exception {
@@ -113,6 +138,12 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.confidence").value(0.72));
     }
 
+    /**
+     * Verifies that the paginated history endpoint returns the expected summary page
+     * when no optional filters are provided.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses should return paged analysis summaries")
     void shouldGetPagedAnalysesSuccessfully() throws Exception {
@@ -150,7 +181,7 @@ class AnalysisControllerTest {
                 2
         );
 
-        when(analysisService.getAnalyses(null, null, null, 0, 20)).thenReturn(resultPage);
+        when(analysisService.getAnalyses(null, null, null, null, null, 0, 20)).thenReturn(resultPage);
 
         mockMvc.perform(get("/api/v1/analyses"))
                 .andExpect(status().isOk())
@@ -166,6 +197,12 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.last").value(true));
     }
 
+    /**
+     * Verifies that the paginated history endpoint applies the standard optional filters
+     * when category, severity, and rule code are provided.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses should apply filters when provided")
     void shouldGetPagedAnalysesWithFiltersSuccessfully() throws Exception {
@@ -193,6 +230,8 @@ class AnalysisControllerTest {
                 eq("DATABASE_CONNECTION"),
                 eq("CRITICAL"),
                 eq("database-connection-rule"),
+                eq(null),
+                eq(null),
                 eq(0),
                 eq(10)
         )).thenReturn(resultPage);
@@ -213,6 +252,122 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.totalPages").value(1));
     }
 
+    /**
+     * Verifies that the history endpoint accepts an inclusive temporal range and
+     * delegates the parsed {@link OffsetDateTime} values to the application service.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
+    @Test
+    @DisplayName("GET /api/v1/analyses should apply date range filters when provided")
+    void shouldGetPagedAnalysesWithDateRangeSuccessfully() throws Exception {
+        final AnalysisResult result = new AnalysisResult(
+                UUID.randomUUID(),
+                OffsetDateTime.parse("2026-04-13T21:47:10.393436Z"),
+                ErrorCategory.UNKNOWN,
+                Severity.LOW,
+                "The input does not match any known rule strongly enough.",
+                List.of("no strong rule match"),
+                List.of("Provide more technical context"),
+                new BigDecimal("0.15"),
+                "unknown-fallback-rule",
+                80,
+                0
+        );
+
+        final Page<AnalysisResult> resultPage = new PageImpl<>(
+                List.of(result),
+                PageRequest.of(0, 20),
+                1
+        );
+
+        when(analysisService.getAnalyses(
+                eq(null),
+                eq(null),
+                eq(null),
+                eq(ANALYZED_FROM),
+                eq(ANALYZED_TO),
+                eq(0),
+                eq(20)
+        )).thenReturn(resultPage);
+
+        mockMvc.perform(get("/api/v1/analyses")
+                        .param("analyzedFrom", "2026-04-13T00:00:00Z")
+                        .param("analyzedTo", "2026-04-19T23:59:59Z")
+                        .param("page", "0")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].ruleCode").value("unknown-fallback-rule"))
+                .andExpect(jsonPath("$.items[0].category").value("UNKNOWN"))
+                .andExpect(jsonPath("$.items[0].severity").value("LOW"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    /**
+     * Verifies that the history endpoint can combine category, severity, rule code,
+     * and temporal filters in the same request.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
+    @Test
+    @DisplayName("GET /api/v1/analyses should apply filters and date range together")
+    void shouldGetPagedAnalysesWithFiltersAndDateRangeSuccessfully() throws Exception {
+        final AnalysisResult result = new AnalysisResult(
+                UUID.randomUUID(),
+                OffsetDateTime.parse("2026-04-13T21:47:10.393436Z"),
+                ErrorCategory.UNKNOWN,
+                Severity.LOW,
+                "The input does not match any known rule strongly enough.",
+                List.of("no strong rule match"),
+                List.of("Provide more technical context"),
+                new BigDecimal("0.15"),
+                "unknown-fallback-rule",
+                80,
+                0
+        );
+
+        final Page<AnalysisResult> resultPage = new PageImpl<>(
+                List.of(result),
+                PageRequest.of(0, 20),
+                1
+        );
+
+        when(analysisService.getAnalyses(
+                eq("UNKNOWN"),
+                eq("LOW"),
+                eq("unknown-fallback-rule"),
+                eq(ANALYZED_FROM),
+                eq(ANALYZED_TO),
+                eq(0),
+                eq(20)
+        )).thenReturn(resultPage);
+
+        mockMvc.perform(get("/api/v1/analyses")
+                        .param("category", "UNKNOWN")
+                        .param("severity", "LOW")
+                        .param("ruleCode", "unknown-fallback-rule")
+                        .param("analyzedFrom", "2026-04-13T00:00:00Z")
+                        .param("analyzedTo", "2026-04-19T23:59:59Z")
+                        .param("page", "0")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].category").value("UNKNOWN"))
+                .andExpect(jsonPath("$.items[0].severity").value("LOW"))
+                .andExpect(jsonPath("$.items[0].ruleCode").value("unknown-fallback-rule"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    /**
+     * Verifies that the statistics endpoint returns the expected aggregated counts.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses/stats should return aggregated statistics")
     void shouldGetAnalysisStatsSuccessfully() throws Exception {
@@ -241,10 +396,16 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.bySeverity[0].count").value(3));
     }
 
+    /**
+     * Verifies that the history endpoint returns a 400 error when the requested page
+     * index is invalid.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses should return 400 when page is invalid")
     void shouldReturnBadRequestWhenPageIsInvalid() throws Exception {
-        when(analysisService.getAnalyses(null, null, null, -1, 20))
+        when(analysisService.getAnalyses(null, null, null, null, null, -1, 20))
                 .thenThrow(new IllegalArgumentException("page must be greater than or equal to 0"));
 
         mockMvc.perform(get("/api/v1/analyses")
@@ -257,10 +418,16 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.path").value("/api/v1/analyses"));
     }
 
+    /**
+     * Verifies that the history endpoint returns a 400 error when the requested page
+     * size exceeds the supported limit.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses should return 400 when size is invalid")
     void shouldReturnBadRequestWhenSizeIsInvalid() throws Exception {
-        when(analysisService.getAnalyses(null, null, null, 0, 101))
+        when(analysisService.getAnalyses(null, null, null, null, null, 0, 101))
                 .thenThrow(new IllegalArgumentException("size must be less than or equal to 100"));
 
         mockMvc.perform(get("/api/v1/analyses")
@@ -272,10 +439,16 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.path").value("/api/v1/analyses"));
     }
 
+    /**
+     * Verifies that the history endpoint returns a 400 error when the category filter
+     * does not match any supported category value.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses should return 400 when category is invalid")
     void shouldReturnBadRequestWhenCategoryIsInvalid() throws Exception {
-        when(analysisService.getAnalyses("NOT_A_REAL_CATEGORY", null, null, 0, 20))
+        when(analysisService.getAnalyses("NOT_A_REAL_CATEGORY", null, null, null, null, 0, 20))
                 .thenThrow(new IllegalArgumentException(
                         "category must be one of: DATABASE_CONNECTION, AUTHENTICATION, AUTHORIZATION, PORT_IN_USE, MISSING_ENVIRONMENT_VARIABLE, NULL_POINTER, SYNTAX_ERROR, TIMEOUT, SQL_ERROR, FILE_NOT_FOUND, UNKNOWN"
                 ));
@@ -289,10 +462,16 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.path").value("/api/v1/analyses"));
     }
 
+    /**
+     * Verifies that the history endpoint returns a 400 error when the severity filter
+     * does not match any supported severity value.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses should return 400 when severity is invalid")
     void shouldReturnBadRequestWhenSeverityIsInvalid() throws Exception {
-        when(analysisService.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, 0, 20))
+        when(analysisService.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, null, null, 0, 20))
                 .thenThrow(new IllegalArgumentException(
                         "severity must be one of: LOW, MEDIUM, HIGH, CRITICAL"
                 ));
@@ -306,6 +485,43 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.path").value("/api/v1/analyses"));
     }
 
+    /**
+     * Verifies that the history endpoint returns a 400 error when the provided temporal
+     * range is semantically invalid.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
+    @Test
+    @DisplayName("GET /api/v1/analyses should return 400 when analyzedFrom is after analyzedTo")
+    void shouldReturnBadRequestWhenDateRangeIsInvalid() throws Exception {
+        when(analysisService.getAnalyses(
+                null,
+                null,
+                null,
+                OffsetDateTime.parse("2026-04-20T00:00:00Z"),
+                OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                0,
+                20
+        )).thenThrow(new IllegalArgumentException(
+                "analyzedFrom must be less than or equal to analyzedTo"
+        ));
+
+        mockMvc.perform(get("/api/v1/analyses")
+                        .param("analyzedFrom", "2026-04-20T00:00:00Z")
+                        .param("analyzedTo", "2026-04-19T00:00:00Z"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("analyzedFrom must be less than or equal to analyzedTo"))
+                .andExpect(jsonPath("$.path").value("/api/v1/analyses"));
+    }
+
+    /**
+     * Verifies that the not-found error emitted by the application service is correctly
+     * translated into the public 404 API response.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
     @Test
     @DisplayName("GET /api/v1/analyses/{id} should return 404 when analysis does not exist")
     void shouldReturnNotFoundWhenAnalysisDoesNotExist() throws Exception {

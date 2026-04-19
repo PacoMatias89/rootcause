@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -42,7 +43,8 @@ import static org.mockito.Mockito.when;
  *
  * <p>These tests verify the application service responsibilities such as input validation,
  * orchestration of the analysis flow, persistence interaction, historical retrieval,
- * statistics retrieval, and filter validation.</p>
+ * statistics retrieval, pagination validation, semantic filter validation, and temporal
+ * range validation.</p>
  */
 class AnalysisServiceImplTest {
 
@@ -51,6 +53,9 @@ class AnalysisServiceImplTest {
     private AnalysisRecordMapper analysisRecordMapper;
     private Clock clock;
 
+    /**
+     * Creates a fresh test fixture before each test execution.
+     */
     @BeforeEach
     void setUp() {
         analysisEngine = mock(AnalysisEngine.class);
@@ -59,6 +64,10 @@ class AnalysisServiceImplTest {
         clock = Clock.fixed(Instant.parse("2026-04-13T10:15:30Z"), ZoneOffset.UTC);
     }
 
+    /**
+     * Verifies that the analysis flow delegates to the engine, builds the domain result,
+     * and persists the generated metadata.
+     */
     @Test
     @DisplayName("Should analyze input and persist metadata from engine decision")
     void shouldAnalyzeInputAndPersistMetadataFromEngineDecision() {
@@ -102,6 +111,10 @@ class AnalysisServiceImplTest {
         verify(analysisRecordRepository, times(1)).save(any());
     }
 
+    /**
+     * Verifies that an unknown diagnosis returned by the engine is also persisted correctly
+     * as part of the historical analysis flow.
+     */
     @Test
     @DisplayName("Should persist fallback result when engine returns unknown diagnosis")
     void shouldPersistFallbackResultWhenEngineReturnsUnknownDiagnosis() {
@@ -141,6 +154,9 @@ class AnalysisServiceImplTest {
         verify(analysisRecordRepository, times(1)).save(any());
     }
 
+    /**
+     * Verifies that a stored analysis can be recovered by identifier when it exists.
+     */
     @Test
     @DisplayName("Should get analysis by id")
     void shouldGetAnalysisById() {
@@ -183,6 +199,10 @@ class AnalysisServiceImplTest {
         assertEquals(0, result.confidence().compareTo(new BigDecimal("0.72")));
     }
 
+    /**
+     * Verifies that the service emits the expected domain exception when the requested
+     * analysis does not exist.
+     */
     @Test
     @DisplayName("Should throw AnalysisNotFoundException when analysis does not exist")
     void shouldThrowAnalysisNotFoundExceptionWhenAnalysisDoesNotExist() {
@@ -200,6 +220,10 @@ class AnalysisServiceImplTest {
         assertThrows(AnalysisNotFoundException.class, () -> service.getAnalysisById(analysisId));
     }
 
+    /**
+     * Verifies that the service returns all persisted analyses in the same ordering
+     * provided by the repository query.
+     */
     @Test
     @DisplayName("Should return all analyses ordered by repository query")
     void shouldReturnAllAnalysesOrderedByRepositoryQuery() {
@@ -253,6 +277,10 @@ class AnalysisServiceImplTest {
         assertEquals("timeout-rule", results.get(1).ruleCode());
     }
 
+    /**
+     * Verifies that the paginated history use case works correctly when the standard
+     * category, severity, and rule code filters are provided.
+     */
     @Test
     @DisplayName("Should return paged analyses with filters")
     void shouldReturnPagedAnalysesWithFilters() {
@@ -286,13 +314,15 @@ class AnalysisServiceImplTest {
                 clock
         );
 
-        when(analysisRecordRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), any(org.springframework.data.domain.Pageable.class)))
+        when(analysisRecordRepository.findAll(any(Specification.class), any(org.springframework.data.domain.Pageable.class)))
                 .thenReturn(entityPage);
 
         final Page<AnalysisResult> resultPage = service.getAnalyses(
                 "DATABASE_CONNECTION",
                 "CRITICAL",
                 "database-connection-rule",
+                null,
+                null,
                 0,
                 10
         );
@@ -304,6 +334,67 @@ class AnalysisServiceImplTest {
         assertEquals(Severity.CRITICAL, resultPage.getContent().get(0).severity());
     }
 
+    /**
+     * Verifies that the paginated history use case also accepts a valid temporal range
+     * together with the standard filters.
+     */
+    @Test
+    @DisplayName("Should return paged analyses with filters and date range")
+    void shouldReturnPagedAnalysesWithFiltersAndDateRange() {
+        final AnalysisRecordEntity entity = analysisRecordMapper.toEntity(
+                "unknown input",
+                new AnalysisResult(
+                        UUID.randomUUID(),
+                        OffsetDateTime.parse("2026-04-13T21:47:10.393436Z"),
+                        ErrorCategory.UNKNOWN,
+                        Severity.LOW,
+                        "The input does not match any known rule strongly enough.",
+                        List.of("no strong rule match"),
+                        List.of("Provide more technical context"),
+                        new BigDecimal("0.15"),
+                        "unknown-fallback-rule",
+                        80,
+                        0
+                )
+        );
+
+        final Page<AnalysisRecordEntity> entityPage = new PageImpl<>(
+                List.of(entity),
+                PageRequest.of(0, 20),
+                1
+        );
+
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
+        );
+
+        when(analysisRecordRepository.findAll(any(Specification.class), any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(entityPage);
+
+        final Page<AnalysisResult> resultPage = service.getAnalyses(
+                "UNKNOWN",
+                "LOW",
+                "unknown-fallback-rule",
+                OffsetDateTime.parse("2026-04-13T00:00:00Z"),
+                OffsetDateTime.parse("2026-04-19T23:59:59Z"),
+                0,
+                20
+        );
+
+        assertEquals(1, resultPage.getTotalElements());
+        assertEquals(1, resultPage.getContent().size());
+        assertEquals("unknown-fallback-rule", resultPage.getContent().get(0).ruleCode());
+        assertEquals(ErrorCategory.UNKNOWN, resultPage.getContent().get(0).category());
+        assertEquals(Severity.LOW, resultPage.getContent().get(0).severity());
+    }
+
+    /**
+     * Verifies that the aggregated statistics use case converts repository projections
+     * into the internal statistics model.
+     */
     @Test
     @DisplayName("Should return aggregated analysis statistics")
     void shouldReturnAggregatedAnalysisStatistics() {
@@ -337,6 +428,10 @@ class AnalysisServiceImplTest {
         assertEquals(3L, stats.bySeverity().get(0).count());
     }
 
+    /**
+     * Verifies that invalid category filters are rejected explicitly instead of silently
+     * producing empty results.
+     */
     @Test
     @DisplayName("Should reject invalid category filter")
     void shouldRejectInvalidCategoryFilter() {
@@ -348,7 +443,7 @@ class AnalysisServiceImplTest {
         );
 
         final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses("NOT_A_REAL_CATEGORY", null, null, 0, 20)
+                service.getAnalyses("NOT_A_REAL_CATEGORY", null, null, null, null, 0, 20)
         );
 
         assertEquals(
@@ -357,6 +452,10 @@ class AnalysisServiceImplTest {
         );
     }
 
+    /**
+     * Verifies that invalid severity filters are rejected explicitly instead of silently
+     * producing empty results.
+     */
     @Test
     @DisplayName("Should reject invalid severity filter")
     void shouldRejectInvalidSeverityFilter() {
@@ -368,7 +467,7 @@ class AnalysisServiceImplTest {
         );
 
         final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, 0, 20)
+                service.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, null, null, 0, 20)
         );
 
         assertEquals(
@@ -377,6 +476,9 @@ class AnalysisServiceImplTest {
         );
     }
 
+    /**
+     * Verifies that a negative page index is rejected.
+     */
     @Test
     @DisplayName("Should reject negative page")
     void shouldRejectNegativePage() {
@@ -388,10 +490,13 @@ class AnalysisServiceImplTest {
         );
 
         assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses(null, null, null, -1, 20)
+                service.getAnalyses(null, null, null, null, null, -1, 20)
         );
     }
 
+    /**
+     * Verifies that non-positive page sizes are rejected.
+     */
     @Test
     @DisplayName("Should reject non-positive size")
     void shouldRejectNonPositiveSize() {
@@ -403,10 +508,13 @@ class AnalysisServiceImplTest {
         );
 
         assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses(null, null, null, 0, 0)
+                service.getAnalyses(null, null, null, null, null, 0, 0)
         );
     }
 
+    /**
+     * Verifies that page sizes greater than the configured maximum are rejected.
+     */
     @Test
     @DisplayName("Should reject size greater than allowed limit")
     void shouldRejectSizeGreaterThanAllowedLimit() {
@@ -418,10 +526,45 @@ class AnalysisServiceImplTest {
         );
 
         assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses(null, null, null, 0, 101)
+                service.getAnalyses(null, null, null, null, null, 0, 101)
         );
     }
 
+    /**
+     * Verifies that an invalid temporal range is rejected when the lower bound is
+     * later than the upper bound.
+     */
+    @Test
+    @DisplayName("Should reject invalid analyzedAt range")
+    void shouldRejectInvalidAnalyzedAtRange() {
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
+        );
+
+        final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                service.getAnalyses(
+                        null,
+                        null,
+                        null,
+                        OffsetDateTime.parse("2026-04-20T00:00:00Z"),
+                        OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                        0,
+                        20
+                )
+        );
+
+        assertEquals(
+                "analyzedFrom must be less than or equal to analyzedTo",
+                exception.getMessage()
+        );
+    }
+
+    /**
+     * Verifies that blank input is rejected before the analysis engine is invoked.
+     */
     @Test
     @DisplayName("Should reject blank input")
     void shouldRejectBlankInput() {
@@ -435,21 +578,41 @@ class AnalysisServiceImplTest {
         assertThrows(IllegalArgumentException.class, () -> service.analyze("   "));
     }
 
+    /**
+     * Minimal projection stub used to test grouped-count repository responses without
+     * involving persistence infrastructure.
+     */
     private static final class TestAnalysisGroupedCountProjection implements AnalysisGroupedCountProjection {
 
         private final String value;
         private final long count;
 
+        /**
+         * Creates a grouped-count projection stub.
+         *
+         * @param value grouped value
+         * @param count grouped count
+         */
         private TestAnalysisGroupedCountProjection(final String value, final long count) {
             this.value = value;
             this.count = count;
         }
 
+        /**
+         * Returns the grouped value.
+         *
+         * @return grouped value
+         */
         @Override
         public String getValue() {
             return value;
         }
 
+        /**
+         * Returns the grouped count.
+         *
+         * @return grouped count
+         */
         @Override
         public long getCount() {
             return count;

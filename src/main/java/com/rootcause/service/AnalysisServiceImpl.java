@@ -3,7 +3,13 @@ package com.rootcause.service;
 import com.rootcause.entity.AnalysisRecordEntity;
 import com.rootcause.exception.AnalysisNotFoundException;
 import com.rootcause.mapper.AnalysisRecordMapper;
-import com.rootcause.model.*;
+import com.rootcause.model.AnalysisCount;
+import com.rootcause.model.AnalysisDecision;
+import com.rootcause.model.AnalysisRequestContext;
+import com.rootcause.model.AnalysisResult;
+import com.rootcause.model.AnalysisStats;
+import com.rootcause.model.ErrorCategory;
+import com.rootcause.model.Severity;
 import com.rootcause.repository.AnalysisGroupedCountProjection;
 import com.rootcause.repository.AnalysisRecordRepository;
 import com.rootcause.repository.AnalysisRecordSpecifications;
@@ -159,14 +165,20 @@ public class AnalysisServiceImpl implements AnalysisService {
      * supported enum names exactly. Invalid values are rejected explicitly instead of producing
      * an empty result set.</p>
      *
+     * <p>When both temporal filters are provided, the lower bound must be earlier than or equal
+     * to the upper bound.</p>
+     *
      * @param category optional category filter
      * @param severity optional severity filter
      * @param ruleCode optional rule-code filter
+     * @param analyzedFrom optional lower bound for the analysis timestamp, inclusive
+     * @param analyzedTo optional upper bound for the analysis timestamp, inclusive
      * @param page zero-based page index
      * @param size requested page size
      * @return page of stored analyses matching the provided criteria
-     * @throws IllegalArgumentException when pagination is invalid or when category/severity
-     *                                  filters do not match supported values
+     * @throws IllegalArgumentException when pagination is invalid, when category or severity
+     *                                  filters do not match supported values, or when the
+     *                                  provided temporal range is invalid
      */
     @Override
     @Transactional(readOnly = true)
@@ -174,12 +186,15 @@ public class AnalysisServiceImpl implements AnalysisService {
             final String category,
             final String severity,
             final String ruleCode,
+            final OffsetDateTime analyzedFrom,
+            final OffsetDateTime analyzedTo,
             final int page,
             final int size
     ) {
         validatePagination(page, size);
         validateCategoryFilter(category);
         validateSeverityFilter(severity);
+        validateAnalyzedAtRange(analyzedFrom, analyzedTo);
 
         final Pageable pageable = PageRequest.of(
                 page,
@@ -190,12 +205,15 @@ public class AnalysisServiceImpl implements AnalysisService {
         final Specification<AnalysisRecordEntity> specification = Specification.allOf(
                 AnalysisRecordSpecifications.hasCategory(category),
                 AnalysisRecordSpecifications.hasSeverity(severity),
-                AnalysisRecordSpecifications.hasRuleCode(ruleCode)
+                AnalysisRecordSpecifications.hasRuleCode(ruleCode),
+                AnalysisRecordSpecifications.hasAnalyzedAtFrom(analyzedFrom),
+                AnalysisRecordSpecifications.hasAnalyzedAtTo(analyzedTo)
         );
 
         return analysisRecordRepository.findAll(specification, pageable)
                 .map(analysisRecordMapper::toModel);
     }
+
     /**
      * Converts a grouped count projection into the internal grouped count model.
      *
@@ -208,6 +226,7 @@ public class AnalysisServiceImpl implements AnalysisService {
                 projection.getCount()
         );
     }
+
     /**
      * Retrieves aggregated statistics for persisted analyses.
      *
@@ -298,6 +317,31 @@ public class AnalysisServiceImpl implements AnalysisService {
         } catch (final IllegalArgumentException exception) {
             throw new IllegalArgumentException(
                     "severity must be one of: " + getAllowedSeverity()
+            );
+        }
+    }
+
+    /**
+     * Validates the optional analysis timestamp range used in historical searches.
+     *
+     * <p>When only one bound is provided, the range is considered valid. When both bounds are
+     * present, the lower bound must be earlier than or equal to the upper bound.</p>
+     *
+     * @param analyzedFrom optional lower bound for the analysis timestamp
+     * @param analyzedTo optional upper bound for the analysis timestamp
+     * @throws IllegalArgumentException when the lower bound is later than the upper bound
+     */
+    private void validateAnalyzedAtRange(
+            final OffsetDateTime analyzedFrom,
+            final OffsetDateTime analyzedTo
+    ) {
+        if (analyzedFrom == null || analyzedTo == null) {
+            return;
+        }
+
+        if (analyzedFrom.isAfter(analyzedTo)) {
+            throw new IllegalArgumentException(
+                    "analyzedFrom must be less than or equal to analyzedTo"
             );
         }
     }
