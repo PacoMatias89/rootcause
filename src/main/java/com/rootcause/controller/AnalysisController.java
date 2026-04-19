@@ -138,15 +138,35 @@ public class AnalysisController {
 
 
     /**
-     * Retrieves aggregated statistics for persisted analyses.
+     * Retrieves aggregated statistics for persisted analyses using optional filters.
      *
+     * <p>Supported optional filters are {@code category}, {@code severity}, {@code ruleCode},
+     * {@code analyzedFrom}, and {@code analyzedTo}. When no filters are provided, the endpoint
+     * returns the global statistics for the full persisted history.</p>
+     *
+     * @param category optional category filter
+     * @param severity optional severity filter
+     * @param ruleCode optional rule-code filter
+     * @param analyzedFrom optional lower bound for the analysis timestamp, inclusive
+     * @param analyzedTo optional upper bound for the analysis timestamp, inclusive
      * @return aggregated analysis statistics response
      */
-
     @GetMapping("analyses/stats")
     @ResponseStatus(HttpStatus.OK)
-    public AnalysisStatsResponse getAnalysisStats(){
-        final AnalysisStats stats = analysisService.getAnalysisStats();
+    public AnalysisStatsResponse getAnalysisStats(
+            @RequestParam(value = "category", required = false) final String category,
+            @RequestParam(value = "severity", required = false) final String severity,
+            @RequestParam(value = "ruleCode", required = false) final String ruleCode,
+            @RequestParam(value = "analyzedFrom", required = false) final OffsetDateTime analyzedFrom,
+            @RequestParam(value = "analyzedTo", required = false) final OffsetDateTime analyzedTo
+    ){
+        final AnalysisStats stats = analysisService.getAnalysisStats(
+                category,
+                severity,
+                ruleCode,
+                analyzedFrom,
+                analyzedTo
+        );
 
         return analysisStatsResponseMapper.toResponse(stats);
     }

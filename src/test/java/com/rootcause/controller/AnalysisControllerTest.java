@@ -364,7 +364,8 @@ class AnalysisControllerTest {
     }
 
     /**
-     * Verifies that the statistics endpoint returns the expected aggregated counts.
+     * Verifies that the statistics endpoint returns aggregated statistics for the full
+     * persisted history when no filters are provided.
      *
      * @throws Exception when the MVC request execution fails unexpectedly
      */
@@ -385,7 +386,7 @@ class AnalysisControllerTest {
                 )
         );
 
-        when(analysisService.getAnalysisStats()).thenReturn(stats);
+        when(analysisService.getAnalysisStats(null, null, null, null, null)).thenReturn(stats);
 
         mockMvc.perform(get("/api/v1/analyses/stats"))
                 .andExpect(status().isOk())
@@ -394,6 +395,47 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.byCategory[0].count").value(3))
                 .andExpect(jsonPath("$.bySeverity[0].value").value("CRITICAL"))
                 .andExpect(jsonPath("$.bySeverity[0].count").value(3));
+    }
+
+    /**
+     * Verifies that the statistics endpoint accepts the same optional filters used by
+     * the history endpoint and returns filtered aggregated statistics.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
+    @Test
+    @DisplayName("GET /api/v1/analyses/stats should return filtered aggregated statistics")
+    void shouldGetFilteredAnalysisStatsSuccessfully() throws Exception {
+        final AnalysisStats stats = new AnalysisStats(
+                2L,
+                List.of(
+                        new AnalysisCount("UNKNOWN", 2L)
+                ),
+                List.of(
+                        new AnalysisCount("LOW", 2L)
+                )
+        );
+
+        when(analysisService.getAnalysisStats(
+                eq("UNKNOWN"),
+                eq("LOW"),
+                eq("unknown-fallback-rule"),
+                eq(ANALYZED_FROM),
+                eq(ANALYZED_TO)
+        )).thenReturn(stats);
+
+        mockMvc.perform(get("/api/v1/analyses/stats")
+                        .param("category", "UNKNOWN")
+                        .param("severity", "LOW")
+                        .param("ruleCode", "unknown-fallback-rule")
+                        .param("analyzedFrom", "2026-04-13T00:00:00Z")
+                        .param("analyzedTo", "2026-04-19T23:59:59Z"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalAnalyses").value(2))
+                .andExpect(jsonPath("$.byCategory[0].value").value("UNKNOWN"))
+                .andExpect(jsonPath("$.byCategory[0].count").value(2))
+                .andExpect(jsonPath("$.bySeverity[0].value").value("LOW"))
+                .andExpect(jsonPath("$.bySeverity[0].count").value(2));
     }
 
     /**
@@ -514,6 +556,35 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.error").value("Bad Request"))
                 .andExpect(jsonPath("$.message").value("analyzedFrom must be less than or equal to analyzedTo"))
                 .andExpect(jsonPath("$.path").value("/api/v1/analyses"));
+    }
+
+    /**
+     * Verifies that the statistics endpoint returns a 400 error when the provided temporal
+     * range is semantically invalid.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
+    @Test
+    @DisplayName("GET /api/v1/analyses/stats should return 400 when analyzedFrom is after analyzedTo")
+    void shouldReturnBadRequestForStatsWhenDateRangeIsInvalid() throws Exception {
+        when(analysisService.getAnalysisStats(
+                null,
+                null,
+                null,
+                OffsetDateTime.parse("2026-04-20T00:00:00Z"),
+                OffsetDateTime.parse("2026-04-19T00:00:00Z")
+        )).thenThrow(new IllegalArgumentException(
+                "analyzedFrom must be less than or equal to analyzedTo"
+        ));
+
+        mockMvc.perform(get("/api/v1/analyses/stats")
+                        .param("analyzedFrom", "2026-04-20T00:00:00Z")
+                        .param("analyzedTo", "2026-04-19T00:00:00Z"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("analyzedFrom must be less than or equal to analyzedTo"))
+                .andExpect(jsonPath("$.path").value("/api/v1/analyses/stats"));
     }
 
     /**

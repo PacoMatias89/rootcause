@@ -392,12 +392,46 @@ class AnalysisServiceImplTest {
     }
 
     /**
-     * Verifies that the aggregated statistics use case converts repository projections
-     * into the internal statistics model.
+     * Verifies that filtered statistics are calculated from the repository results using
+     * the same filtering rules as the historical search use case.
      */
     @Test
-    @DisplayName("Should return aggregated analysis statistics")
-    void shouldReturnAggregatedAnalysisStatistics() {
+    @DisplayName("Should return filtered aggregated analysis statistics")
+    void shouldReturnFilteredAggregatedAnalysisStatistics() {
+        final AnalysisRecordEntity first = analysisRecordMapper.toEntity(
+                "first filtered input",
+                new AnalysisResult(
+                        UUID.randomUUID(),
+                        OffsetDateTime.parse("2026-04-13T10:15:30Z"),
+                        ErrorCategory.UNKNOWN,
+                        Severity.LOW,
+                        "First filtered result.",
+                        List.of("pattern-a"),
+                        List.of("step-a"),
+                        new BigDecimal("0.15"),
+                        "unknown-fallback-rule",
+                        10,
+                        0
+                )
+        );
+
+        final AnalysisRecordEntity second = analysisRecordMapper.toEntity(
+                "second filtered input",
+                new AnalysisResult(
+                        UUID.randomUUID(),
+                        OffsetDateTime.parse("2026-04-14T10:15:30Z"),
+                        ErrorCategory.UNKNOWN,
+                        Severity.LOW,
+                        "Second filtered result.",
+                        List.of("pattern-b"),
+                        List.of("step-b"),
+                        new BigDecimal("0.18"),
+                        "unknown-fallback-rule",
+                        12,
+                        0
+                )
+        );
+
         final AnalysisServiceImpl service = new AnalysisServiceImpl(
                 analysisEngine,
                 analysisRecordRepository,
@@ -405,27 +439,54 @@ class AnalysisServiceImplTest {
                 clock
         );
 
-        when(analysisRecordRepository.count()).thenReturn(6L);
-        when(analysisRecordRepository.countGroupedByCategory()).thenReturn(List.of(
-                new TestAnalysisGroupedCountProjection("DATABASE_CONNECTION", 3L),
-                new TestAnalysisGroupedCountProjection("TIMEOUT", 2L),
-                new TestAnalysisGroupedCountProjection("NULL_POINTER", 1L)
-        ));
-        when(analysisRecordRepository.countGroupedBySeverity()).thenReturn(List.of(
-                new TestAnalysisGroupedCountProjection("CRITICAL", 3L),
-                new TestAnalysisGroupedCountProjection("HIGH", 2L),
-                new TestAnalysisGroupedCountProjection("MEDIUM", 1L)
-        ));
+        when(analysisRecordRepository.findAll(any(Specification.class)))
+                .thenReturn(List.of(first, second));
 
-        final AnalysisStats stats = service.getAnalysisStats();
+        final AnalysisStats stats = service.getAnalysisStats(
+                "UNKNOWN",
+                "LOW",
+                "unknown-fallback-rule",
+                OffsetDateTime.parse("2026-04-13T00:00:00Z"),
+                OffsetDateTime.parse("2026-04-19T23:59:59Z")
+        );
 
-        assertEquals(6L, stats.totalAnalyses());
-        assertEquals(3, stats.byCategory().size());
-        assertEquals("DATABASE_CONNECTION", stats.byCategory().get(0).value());
-        assertEquals(3L, stats.byCategory().get(0).count());
-        assertEquals(3, stats.bySeverity().size());
-        assertEquals("CRITICAL", stats.bySeverity().get(0).value());
-        assertEquals(3L, stats.bySeverity().get(0).count());
+        assertEquals(2L, stats.totalAnalyses());
+        assertEquals(1, stats.byCategory().size());
+        assertEquals("UNKNOWN", stats.byCategory().get(0).value());
+        assertEquals(2L, stats.byCategory().get(0).count());
+        assertEquals(1, stats.bySeverity().size());
+        assertEquals("LOW", stats.bySeverity().get(0).value());
+        assertEquals(2L, stats.bySeverity().get(0).count());
+    }
+
+    /**
+     * Verifies that filtered statistics return empty grouped results when no persisted
+     * analysis matches the provided filters.
+     */
+    @Test
+    @DisplayName("Should return empty filtered aggregated analysis statistics when no records match")
+    void shouldReturnEmptyFilteredAggregatedAnalysisStatisticsWhenNoRecordsMatch() {
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
+        );
+
+        when(analysisRecordRepository.findAll(any(Specification.class)))
+                .thenReturn(List.of());
+
+        final AnalysisStats stats = service.getAnalysisStats(
+                "UNKNOWN",
+                "LOW",
+                "unknown-fallback-rule",
+                OffsetDateTime.parse("2026-04-13T00:00:00Z"),
+                OffsetDateTime.parse("2026-04-19T23:59:59Z")
+        );
+
+        assertEquals(0L, stats.totalAnalyses());
+        assertEquals(0, stats.byCategory().size());
+        assertEquals(0, stats.bySeverity().size());
     }
 
     /**
@@ -468,6 +529,52 @@ class AnalysisServiceImplTest {
 
         final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
                 service.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, null, null, 0, 20)
+        );
+
+        assertEquals(
+                "severity must be one of: LOW, MEDIUM, HIGH, CRITICAL",
+                exception.getMessage()
+        );
+    }
+
+    /**
+     * Verifies that invalid category filters are rejected by the filtered statistics use case.
+     */
+    @Test
+    @DisplayName("Should reject invalid category filter for filtered statistics")
+    void shouldRejectInvalidCategoryFilterForFilteredStatistics() {
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
+        );
+
+        final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                service.getAnalysisStats("NOT_A_REAL_CATEGORY", null, null, null, null)
+        );
+
+        assertEquals(
+                "category must be one of: DATABASE_CONNECTION, AUTHENTICATION, AUTHORIZATION, PORT_IN_USE, MISSING_ENVIRONMENT_VARIABLE, NULL_POINTER, SYNTAX_ERROR, TIMEOUT, SQL_ERROR, FILE_NOT_FOUND, UNKNOWN",
+                exception.getMessage()
+        );
+    }
+
+    /**
+     * Verifies that invalid severity filters are rejected by the filtered statistics use case.
+     */
+    @Test
+    @DisplayName("Should reject invalid severity filter for filtered statistics")
+    void shouldRejectInvalidSeverityFilterForFilteredStatistics() {
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
+        );
+
+        final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                service.getAnalysisStats(null, "NOT_A_REAL_SEVERITY", null, null, null)
         );
 
         assertEquals(
@@ -553,6 +660,35 @@ class AnalysisServiceImplTest {
                         OffsetDateTime.parse("2026-04-19T00:00:00Z"),
                         0,
                         20
+                )
+        );
+
+        assertEquals(
+                "analyzedFrom must be less than or equal to analyzedTo",
+                exception.getMessage()
+        );
+    }
+
+    /**
+     * Verifies that invalid temporal ranges are also rejected by the filtered statistics use case.
+     */
+    @Test
+    @DisplayName("Should reject invalid analyzedAt range for filtered statistics")
+    void shouldRejectInvalidAnalyzedAtRangeForFilteredStatistics() {
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
+        );
+
+        final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                service.getAnalysisStats(
+                        null,
+                        null,
+                        null,
+                        OffsetDateTime.parse("2026-04-20T00:00:00Z"),
+                        OffsetDateTime.parse("2026-04-19T00:00:00Z")
                 )
         );
 

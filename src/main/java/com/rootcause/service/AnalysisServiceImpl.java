@@ -26,7 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -43,6 +45,7 @@ import java.util.stream.Collectors;
  *     <li>persisting the generated analysis</li>
  *     <li>retrieving previously stored analyses</li>
  *     <li>validating pagination and filter parameters for historical queries</li>
+ *     <li>calculating aggregated statistics, optionally over filtered subsets of the history</li>
  * </ol>
  *
  * <p>The service acts as an application orchestrator and intentionally keeps diagnosis generation
@@ -202,16 +205,72 @@ public class AnalysisServiceImpl implements AnalysisService {
                 Sort.by(Sort.Direction.DESC, "analyzedAt")
         );
 
-        final Specification<AnalysisRecordEntity> specification = Specification.allOf(
-                AnalysisRecordSpecifications.hasCategory(category),
-                AnalysisRecordSpecifications.hasSeverity(severity),
-                AnalysisRecordSpecifications.hasRuleCode(ruleCode),
-                AnalysisRecordSpecifications.hasAnalyzedAtFrom(analyzedFrom),
-                AnalysisRecordSpecifications.hasAnalyzedAtTo(analyzedTo)
+        final Specification<AnalysisRecordEntity> specification = buildAnalysisSpecification(
+                category,
+                severity,
+                ruleCode,
+                analyzedFrom,
+                analyzedTo
         );
 
         return analysisRecordRepository.findAll(specification, pageable)
                 .map(analysisRecordMapper::toModel);
+    }
+
+    /**
+     * Retrieves aggregated statistics for persisted analyses using optional filters.
+     *
+     * <p>When no filters are provided, the method returns statistics for the full persisted
+     * analysis history. When filters are provided, the method calculates the grouped counts
+     * over the filtered subset using the same filtering rules supported by the history endpoint.</p>
+     *
+     * @param category optional category filter
+     * @param severity optional severity filter
+     * @param ruleCode optional rule-code filter
+     * @param analyzedFrom optional lower bound for the analysis timestamp, inclusive
+     * @param analyzedTo optional upper bound for the analysis timestamp, inclusive
+     * @return aggregated analysis statistics
+     * @throws IllegalArgumentException when category or severity filters are invalid or when
+     *                                  the temporal range is invalid
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public AnalysisStats getAnalysisStats(
+            final String category,
+            final String severity,
+            final String ruleCode,
+            final OffsetDateTime analyzedFrom,
+            final OffsetDateTime analyzedTo
+    ) {
+        validateCategoryFilter(category);
+        validateSeverityFilter(severity);
+        validateAnalyzedAtRange(analyzedFrom, analyzedTo);
+
+        final Specification<AnalysisRecordEntity> specification = buildAnalysisSpecification(
+                category,
+                severity,
+                ruleCode,
+                analyzedFrom,
+                analyzedTo
+        );
+
+        final List<AnalysisRecordEntity> filteredRecords = analysisRecordRepository.findAll(specification);
+
+        final long totalAnalyses = filteredRecords.size();
+        final List<AnalysisCount> byCategory = groupAndSortCounts(
+                filteredRecords,
+                AnalysisRecordEntity::getCategory
+        );
+        final List<AnalysisCount> bySeverity = groupAndSortCounts(
+                filteredRecords,
+                AnalysisRecordEntity::getSeverity
+        );
+
+        return new AnalysisStats(
+                totalAnalyses,
+                byCategory,
+                bySeverity
+        );
     }
 
     /**
@@ -228,13 +287,69 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     /**
-     * Retrieves aggregated statistics for persisted analyses.
+     * Builds the specification used to filter persisted analyses for both history retrieval
+     * and filtered statistics calculation.
      *
-     * @return aggregated analysis statistics
+     * @param category optional category filter
+     * @param severity optional severity filter
+     * @param ruleCode optional rule-code filter
+     * @param analyzedFrom optional lower bound for the analysis timestamp, inclusive
+     * @param analyzedTo optional upper bound for the analysis timestamp, inclusive
+     * @return combined analysis specification
      */
-    @Override
+    private Specification<AnalysisRecordEntity> buildAnalysisSpecification(
+            final String category,
+            final String severity,
+            final String ruleCode,
+            final OffsetDateTime analyzedFrom,
+            final OffsetDateTime analyzedTo
+    ) {
+        return Specification.allOf(
+                AnalysisRecordSpecifications.hasCategory(category),
+                AnalysisRecordSpecifications.hasSeverity(severity),
+                AnalysisRecordSpecifications.hasRuleCode(ruleCode),
+                AnalysisRecordSpecifications.hasAnalyzedAtFrom(analyzedFrom),
+                AnalysisRecordSpecifications.hasAnalyzedAtTo(analyzedTo)
+        );
+    }
+
+    /**
+     * Groups the provided records by the extracted field and returns sorted grouped counts.
+     *
+     * <p>The resulting grouped counts are ordered by count descending and then by value ascending
+     * to preserve the same ordering semantics already used in the global repository queries.</p>
+     *
+     * @param records persisted records to aggregate
+     * @param classifier extractor used to choose the grouping field
+     * @return grouped and sorted analysis counts
+     */
+    private List<AnalysisCount> groupAndSortCounts(
+            final List<AnalysisRecordEntity> records,
+            final java.util.function.Function<AnalysisRecordEntity, String> classifier
+    ) {
+        final Map<String, Long> groupedCounts = records.stream()
+                .collect(Collectors.groupingBy(classifier, Collectors.counting()));
+
+        return groupedCounts.entrySet()
+                .stream()
+                .map(entry -> new AnalysisCount(entry.getKey(), entry.getValue()))
+                .sorted(
+                        Comparator.comparingLong(AnalysisCount::count).reversed()
+                                .thenComparing(AnalysisCount::value)
+                )
+                .toList();
+    }
+
+    /**
+     * Retrieves aggregated statistics for the full persisted history without filters.
+     *
+     * <p>This helper is kept only to centralize the transformation of repository grouped-count
+     * projections when that behaviour is needed again in future refactors.</p>
+     *
+     * @return aggregated statistics for the full history
+     */
     @Transactional(readOnly = true)
-    public AnalysisStats getAnalysisStats() {
+    public AnalysisStats getGlobalAnalysisStats() {
         final long totalAnalyses = analysisRecordRepository.count();
 
         final List<AnalysisCount> byCategory = analysisRecordRepository.countGroupedByCategory()

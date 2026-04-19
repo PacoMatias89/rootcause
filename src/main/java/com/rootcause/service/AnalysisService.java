@@ -70,5 +70,11 @@ public interface AnalysisService {
      *
      * @return aggregated analysis statistics
      */
-    AnalysisStats getAnalysisStats();
+    AnalysisStats getAnalysisStats(
+            String category,
+            String severity,
+            String ruleCode,
+            OffsetDateTime analyzedFrom,
+            OffsetDateTime analyzedTo
+    );
 }
