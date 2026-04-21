@@ -89,12 +89,16 @@ public class AnalysisController {
     /**
      * Retrieves stored analyses using optional filters and paginated access.
      *
-     * <p>Supported optional filters are {@code category}, {@code severity}, and
-     * {@code ruleCode}. Results are returned ordered from newest to oldest.</p>
+     * <p>Supported optional filters are {@code category}, {@code severity}, {@code ruleCode},
+     * {@code analyzedFrom}, {@code analyzedTo}, and {@code search}. Results are always returned
+     * ordered from newest to oldest by analysis timestamp.</p>
      *
      * @param category optional category filter
      * @param severity optional severity filter
      * @param ruleCode optional rule-code filter
+     * @param analyzedFrom optional lower bound for the analysis timestamp, inclusive
+     * @param analyzedTo optional upper bound for the analysis timestamp, inclusive
+     * @param search optional free-text search over persisted textual analysis fields
      * @param page zero-based page index
      * @param size requested page size
      * @return paginated response containing matching analysis summaries
@@ -107,6 +111,7 @@ public class AnalysisController {
             @RequestParam(value = "ruleCode", required = false) final String ruleCode,
             @RequestParam(value = "analyzedFrom", required = false) final OffsetDateTime analyzedFrom,
             @RequestParam(value = "analyzedTo", required = false) final OffsetDateTime analyzedTo,
+            @RequestParam(value = "search",  required = false) final String search,
             @RequestParam(value = "page", defaultValue = "0") final int page,
             @RequestParam(value = "size", defaultValue = "20") final int size
     ) {
@@ -116,6 +121,7 @@ public class AnalysisController {
                 ruleCode,
                 analyzedFrom,
                 analyzedTo,
+                search,
                 page,
                 size
         );

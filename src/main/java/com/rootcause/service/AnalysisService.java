@@ -45,14 +45,14 @@ public interface AnalysisService {
 
     List<AnalysisResult> getAllAnalyses();
     /**
-     * Retrieves stored analyses using optional filters and paginated access.
+     * Retrieves aggregated statistics for persisted analyses using optional filters.
      *
      * @param category optional category filter
      * @param severity optional severity filter
      * @param ruleCode optional rule-code filter
-     * @param page zero-based page index
-     * @param size requested page size
-     * @return page of stored analyses that match the provided filters
+     * @param analyzedFrom optional lower bound for the analysis timestamp, inclusive
+     * @param analyzedTo optional upper bound for the analysis timestamp, inclusive
+     * @return aggregated analysis statistics
      */
 
     Page<AnalysisResult> getAnalyses(
@@ -61,6 +61,7 @@ public interface AnalysisService {
             String ruleCode,
             OffsetDateTime analyzedFrom,
             OffsetDateTime analyzedTo,
+            String search,
             int page,
             int size
     );

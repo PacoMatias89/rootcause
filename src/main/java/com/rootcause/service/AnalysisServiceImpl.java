@@ -176,6 +176,7 @@ public class AnalysisServiceImpl implements AnalysisService {
      * @param ruleCode optional rule-code filter
      * @param analyzedFrom optional lower bound for the analysis timestamp, inclusive
      * @param analyzedTo optional upper bound for the analysis timestamp, inclusive
+     * @param search optional free-text search over persisted textual analysis fields
      * @param page zero-based page index
      * @param size requested page size
      * @return page of stored analyses matching the provided criteria
@@ -191,6 +192,7 @@ public class AnalysisServiceImpl implements AnalysisService {
             final String ruleCode,
             final OffsetDateTime analyzedFrom,
             final OffsetDateTime analyzedTo,
+            String search,
             final int page,
             final int size
     ) {
@@ -210,7 +212,8 @@ public class AnalysisServiceImpl implements AnalysisService {
                 severity,
                 ruleCode,
                 analyzedFrom,
-                analyzedTo
+                analyzedTo,
+                search
         );
 
         return analysisRecordRepository.findAll(specification, pageable)
@@ -251,7 +254,8 @@ public class AnalysisServiceImpl implements AnalysisService {
                 severity,
                 ruleCode,
                 analyzedFrom,
-                analyzedTo
+                analyzedTo,
+                null
         );
 
         final List<AnalysisRecordEntity> filteredRecords = analysisRecordRepository.findAll(specification);
@@ -302,14 +306,17 @@ public class AnalysisServiceImpl implements AnalysisService {
             final String severity,
             final String ruleCode,
             final OffsetDateTime analyzedFrom,
-            final OffsetDateTime analyzedTo
+            final OffsetDateTime analyzedTo,
+            final String search
     ) {
         return Specification.allOf(
                 AnalysisRecordSpecifications.hasCategory(category),
                 AnalysisRecordSpecifications.hasSeverity(severity),
                 AnalysisRecordSpecifications.hasRuleCode(ruleCode),
                 AnalysisRecordSpecifications.hasAnalyzedAtFrom(analyzedFrom),
-                AnalysisRecordSpecifications.hasAnalyzedAtTo(analyzedTo)
+                AnalysisRecordSpecifications.hasAnalyzedAtTo(analyzedTo),
+                AnalysisRecordSpecifications.matchesSearch(search)
+
         );
     }
 

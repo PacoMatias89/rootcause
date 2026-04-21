@@ -43,8 +43,8 @@ import static org.mockito.Mockito.when;
  *
  * <p>These tests verify the application service responsibilities such as input validation,
  * orchestration of the analysis flow, persistence interaction, historical retrieval,
- * statistics retrieval, pagination validation, semantic filter validation, and temporal
- * range validation.</p>
+ * statistics retrieval, pagination validation, semantic filter validation, temporal
+ * range validation, and free-text search support.</p>
  */
 class AnalysisServiceImplTest {
 
@@ -323,6 +323,7 @@ class AnalysisServiceImplTest {
                 "database-connection-rule",
                 null,
                 null,
+                null,
                 0,
                 10
         );
@@ -380,6 +381,7 @@ class AnalysisServiceImplTest {
                 "unknown-fallback-rule",
                 OffsetDateTime.parse("2026-04-13T00:00:00Z"),
                 OffsetDateTime.parse("2026-04-19T23:59:59Z"),
+                null,
                 0,
                 20
         );
@@ -389,6 +391,64 @@ class AnalysisServiceImplTest {
         assertEquals("unknown-fallback-rule", resultPage.getContent().get(0).ruleCode());
         assertEquals(ErrorCategory.UNKNOWN, resultPage.getContent().get(0).category());
         assertEquals(Severity.LOW, resultPage.getContent().get(0).severity());
+    }
+
+    /**
+     * Verifies that the paginated history use case accepts free-text search and returns
+     * matching persisted analyses.
+     */
+    @Test
+    @DisplayName("Should return paged analyses with search")
+    void shouldReturnPagedAnalysesWithSearch() {
+        final AnalysisRecordEntity entity = analysisRecordMapper.toEntity(
+                "org.postgresql.util.PSQLException: Connection refused",
+                new AnalysisResult(
+                        UUID.randomUUID(),
+                        OffsetDateTime.parse("2026-04-13T10:15:30Z"),
+                        ErrorCategory.DATABASE_CONNECTION,
+                        Severity.CRITICAL,
+                        "The application cannot establish a connection to the database.",
+                        List.of("connection refused"),
+                        List.of("Verify database availability"),
+                        new BigDecimal("0.80"),
+                        "database-connection-rule",
+                        50,
+                        1
+                )
+        );
+
+        final Page<AnalysisRecordEntity> entityPage = new PageImpl<>(
+                List.of(entity),
+                PageRequest.of(0, 20),
+                1
+        );
+
+        final AnalysisServiceImpl service = new AnalysisServiceImpl(
+                analysisEngine,
+                analysisRecordRepository,
+                analysisRecordMapper,
+                clock
+        );
+
+        when(analysisRecordRepository.findAll(any(Specification.class), any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(entityPage);
+
+        final Page<AnalysisResult> resultPage = service.getAnalyses(
+                null,
+                null,
+                null,
+                null,
+                null,
+                "connection refused",
+                0,
+                20
+        );
+
+        assertEquals(1, resultPage.getTotalElements());
+        assertEquals(1, resultPage.getContent().size());
+        assertEquals("database-connection-rule", resultPage.getContent().get(0).ruleCode());
+        assertEquals(ErrorCategory.DATABASE_CONNECTION, resultPage.getContent().get(0).category());
+        assertEquals(Severity.CRITICAL, resultPage.getContent().get(0).severity());
     }
 
     /**
@@ -504,7 +564,7 @@ class AnalysisServiceImplTest {
         );
 
         final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses("NOT_A_REAL_CATEGORY", null, null, null, null, 0, 20)
+                service.getAnalyses("NOT_A_REAL_CATEGORY", null, null, null, null, null, 0, 20)
         );
 
         assertEquals(
@@ -528,7 +588,7 @@ class AnalysisServiceImplTest {
         );
 
         final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, null, null, 0, 20)
+                service.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, null, null, null, 0, 20)
         );
 
         assertEquals(
@@ -597,7 +657,7 @@ class AnalysisServiceImplTest {
         );
 
         assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses(null, null, null, null, null, -1, 20)
+                service.getAnalyses(null, null, null, null, null, null, -1, 20)
         );
     }
 
@@ -615,7 +675,7 @@ class AnalysisServiceImplTest {
         );
 
         assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses(null, null, null, null, null, 0, 0)
+                service.getAnalyses(null, null, null, null, null, null, 0, 0)
         );
     }
 
@@ -633,7 +693,7 @@ class AnalysisServiceImplTest {
         );
 
         assertThrows(IllegalArgumentException.class, () ->
-                service.getAnalyses(null, null, null, null, null, 0, 101)
+                service.getAnalyses(null, null, null, null, null, null, 0, 101)
         );
     }
 
@@ -658,6 +718,7 @@ class AnalysisServiceImplTest {
                         null,
                         OffsetDateTime.parse("2026-04-20T00:00:00Z"),
                         OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                        null,
                         0,
                         20
                 )

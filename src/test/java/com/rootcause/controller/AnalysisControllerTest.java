@@ -181,7 +181,7 @@ class AnalysisControllerTest {
                 2
         );
 
-        when(analysisService.getAnalyses(null, null, null, null, null, 0, 20)).thenReturn(resultPage);
+        when(analysisService.getAnalyses(null, null, null, null, null, null, 0, 20)).thenReturn(resultPage);
 
         mockMvc.perform(get("/api/v1/analyses"))
                 .andExpect(status().isOk())
@@ -230,6 +230,7 @@ class AnalysisControllerTest {
                 eq("DATABASE_CONNECTION"),
                 eq("CRITICAL"),
                 eq("database-connection-rule"),
+                eq(null),
                 eq(null),
                 eq(null),
                 eq(0),
@@ -287,6 +288,7 @@ class AnalysisControllerTest {
                 eq(null),
                 eq(ANALYZED_FROM),
                 eq(ANALYZED_TO),
+                eq(null),
                 eq(0),
                 eq(20)
         )).thenReturn(resultPage);
@@ -341,6 +343,7 @@ class AnalysisControllerTest {
                 eq("unknown-fallback-rule"),
                 eq(ANALYZED_FROM),
                 eq(ANALYZED_TO),
+                eq(null),
                 eq(0),
                 eq(20)
         )).thenReturn(resultPage);
@@ -361,6 +364,111 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.size").value(20))
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    /**
+     * Verifies that the history endpoint delegates the free-text search value correctly
+     * and returns matching paged summaries.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
+    @Test
+    @DisplayName("GET /api/v1/analyses should apply text search when provided")
+    void shouldGetPagedAnalysesWithSearchSuccessfully() throws Exception {
+        final AnalysisResult result = new AnalysisResult(
+                UUID.randomUUID(),
+                OffsetDateTime.parse("2026-04-13T10:15:30Z"),
+                ErrorCategory.DATABASE_CONNECTION,
+                Severity.CRITICAL,
+                "The application cannot establish a connection to the database.",
+                List.of("connection refused"),
+                List.of("Verify database availability"),
+                new BigDecimal("0.80"),
+                "database-connection-rule",
+                100,
+                1
+        );
+
+        final Page<AnalysisResult> resultPage = new PageImpl<>(
+                List.of(result),
+                PageRequest.of(0, 20),
+                1
+        );
+
+        when(analysisService.getAnalyses(
+                eq(null),
+                eq(null),
+                eq(null),
+                eq(null),
+                eq(null),
+                eq("connection refused"),
+                eq(0),
+                eq(20)
+        )).thenReturn(resultPage);
+
+        mockMvc.perform(get("/api/v1/analyses")
+                        .param("search", "connection refused"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].category").value("DATABASE_CONNECTION"))
+                .andExpect(jsonPath("$.items[0].severity").value("CRITICAL"))
+                .andExpect(jsonPath("$.items[0].ruleCode").value("database-connection-rule"))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    /**
+     * Verifies that the history endpoint can combine the free-text search filter with
+     * the rest of the supported history filters.
+     *
+     * @throws Exception when the MVC request execution fails unexpectedly
+     */
+    @Test
+    @DisplayName("GET /api/v1/analyses should apply search with other filters")
+    void shouldGetPagedAnalysesWithSearchAndOtherFiltersSuccessfully() throws Exception {
+        final AnalysisResult result = new AnalysisResult(
+                UUID.randomUUID(),
+                OffsetDateTime.parse("2026-04-13T21:47:10.393436Z"),
+                ErrorCategory.UNKNOWN,
+                Severity.LOW,
+                "The input does not match any known rule strongly enough.",
+                List.of("no strong rule match"),
+                List.of("Provide more technical context"),
+                new BigDecimal("0.15"),
+                "unknown-fallback-rule",
+                80,
+                0
+        );
+
+        final Page<AnalysisResult> resultPage = new PageImpl<>(
+                List.of(result),
+                PageRequest.of(0, 20),
+                1
+        );
+
+        when(analysisService.getAnalyses(
+                eq("UNKNOWN"),
+                eq("LOW"),
+                eq("unknown-fallback-rule"),
+                eq(ANALYZED_FROM),
+                eq(ANALYZED_TO),
+                eq("unknown"),
+                eq(0),
+                eq(20)
+        )).thenReturn(resultPage);
+
+        mockMvc.perform(get("/api/v1/analyses")
+                        .param("category", "UNKNOWN")
+                        .param("severity", "LOW")
+                        .param("ruleCode", "unknown-fallback-rule")
+                        .param("analyzedFrom", "2026-04-13T00:00:00Z")
+                        .param("analyzedTo", "2026-04-19T23:59:59Z")
+                        .param("search", "unknown")
+                        .param("page", "0")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].category").value("UNKNOWN"))
+                .andExpect(jsonPath("$.items[0].severity").value("LOW"))
+                .andExpect(jsonPath("$.items[0].ruleCode").value("unknown-fallback-rule"))
+                .andExpect(jsonPath("$.totalElements").value(1));
     }
 
     /**
@@ -447,7 +555,7 @@ class AnalysisControllerTest {
     @Test
     @DisplayName("GET /api/v1/analyses should return 400 when page is invalid")
     void shouldReturnBadRequestWhenPageIsInvalid() throws Exception {
-        when(analysisService.getAnalyses(null, null, null, null, null, -1, 20))
+        when(analysisService.getAnalyses(null, null, null, null, null, null, -1, 20))
                 .thenThrow(new IllegalArgumentException("page must be greater than or equal to 0"));
 
         mockMvc.perform(get("/api/v1/analyses")
@@ -469,7 +577,7 @@ class AnalysisControllerTest {
     @Test
     @DisplayName("GET /api/v1/analyses should return 400 when size is invalid")
     void shouldReturnBadRequestWhenSizeIsInvalid() throws Exception {
-        when(analysisService.getAnalyses(null, null, null, null, null, 0, 101))
+        when(analysisService.getAnalyses(null, null, null, null, null, null, 0, 101))
                 .thenThrow(new IllegalArgumentException("size must be less than or equal to 100"));
 
         mockMvc.perform(get("/api/v1/analyses")
@@ -490,7 +598,7 @@ class AnalysisControllerTest {
     @Test
     @DisplayName("GET /api/v1/analyses should return 400 when category is invalid")
     void shouldReturnBadRequestWhenCategoryIsInvalid() throws Exception {
-        when(analysisService.getAnalyses("NOT_A_REAL_CATEGORY", null, null, null, null, 0, 20))
+        when(analysisService.getAnalyses("NOT_A_REAL_CATEGORY", null, null, null, null, null, 0, 20))
                 .thenThrow(new IllegalArgumentException(
                         "category must be one of: DATABASE_CONNECTION, AUTHENTICATION, AUTHORIZATION, PORT_IN_USE, MISSING_ENVIRONMENT_VARIABLE, NULL_POINTER, SYNTAX_ERROR, TIMEOUT, SQL_ERROR, FILE_NOT_FOUND, UNKNOWN"
                 ));
@@ -513,7 +621,7 @@ class AnalysisControllerTest {
     @Test
     @DisplayName("GET /api/v1/analyses should return 400 when severity is invalid")
     void shouldReturnBadRequestWhenSeverityIsInvalid() throws Exception {
-        when(analysisService.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, null, null, 0, 20))
+        when(analysisService.getAnalyses(null, "NOT_A_REAL_SEVERITY", null, null, null, null, 0, 20))
                 .thenThrow(new IllegalArgumentException(
                         "severity must be one of: LOW, MEDIUM, HIGH, CRITICAL"
                 ));
@@ -542,6 +650,7 @@ class AnalysisControllerTest {
                 null,
                 OffsetDateTime.parse("2026-04-20T00:00:00Z"),
                 OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                null,
                 0,
                 20
         )).thenThrow(new IllegalArgumentException(

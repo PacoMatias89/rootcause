@@ -4,6 +4,7 @@ import com.rootcause.entity.AnalysisRecordEntity;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.time.OffsetDateTime;
+import java.util.Locale;
 
 /**
  * Specification factory for {@link AnalysisRecordEntity} filtering.
@@ -33,6 +34,26 @@ public final class AnalysisRecordSpecifications {
      * Name of the entity field that stores the analysis timestamp.
      */
     private static final String ANALYZED_AT_FIELD = "analyzedAt";
+
+    /**
+     * Name of the entity field that stores the original analyzed input text.
+     */
+    private static final String INPUT_TEXT_FIELD = "inputText";
+
+    /**
+     * Name of the entity field that stores the probable cause text.
+     */
+    private static final String PROBABLE_CAUSE_FIELD = "probableCause";
+
+    /**
+     * Name of the entity field that stores detected patterns as persisted text.
+     */
+    private static final String DETECTED_PATTERNS_FIELD = "detectedPatterns";
+
+    /**
+     * Name of the entity field that stores recommended steps as persisted text.
+     */
+    private static final String RECOMMENDED_STEPS_FIELD = "recommendedSteps";
 
     /**
      * Utility constructor.
@@ -119,5 +140,40 @@ public final class AnalysisRecordSpecifications {
 
         return (root, query, criteriaBuilder) ->
                 criteriaBuilder.lessThanOrEqualTo(root.get(ANALYZED_AT_FIELD), analyzedTo);
+    }
+
+    /**
+     * Builds a case-insensitive free-text search specification over the persisted textual
+     * fields that are most useful for historical exploration.
+     *
+     * <p>The search is applied with partial matching over:</p>
+     *
+     * <ul>
+     *     <li>{@code inputText}</li>
+     *     <li>{@code probableCause}</li>
+     *     <li>{@code detectedPatterns}</li>
+     *     <li>{@code recommendedSteps}</li>
+     *     <li>{@code ruleCode}</li>
+     * </ul>
+     *
+     * <p>Blank values are treated as absent filters and therefore do not restrict the query.</p>
+     *
+     * @param search free-text search value
+     * @return combined search specification, or an unrestricted specification when blank
+     */
+    public static Specification<AnalysisRecordEntity> matchesSearch(final String search) {
+        if (search == null || search.isBlank()) {
+            return Specification.unrestricted();
+        }
+
+        final String normalizedSearch = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+
+        return (root, query, criteriaBuilder) -> criteriaBuilder.or(
+                criteriaBuilder.like(criteriaBuilder.lower(root.get(INPUT_TEXT_FIELD)), normalizedSearch),
+                criteriaBuilder.like(criteriaBuilder.lower(root.get(PROBABLE_CAUSE_FIELD)), normalizedSearch),
+                criteriaBuilder.like(criteriaBuilder.lower(root.get(DETECTED_PATTERNS_FIELD)), normalizedSearch),
+                criteriaBuilder.like(criteriaBuilder.lower(root.get(RECOMMENDED_STEPS_FIELD)), normalizedSearch),
+                criteriaBuilder.like(criteriaBuilder.lower(root.get(RULE_CODE_FIELD)), normalizedSearch)
+        );
     }
 }
