@@ -15,7 +15,7 @@ import java.time.Clock;
  *
  * <ul>
  *     <li>a shared {@link Clock} bean for deterministic UTC-based time access</li>
- *     <li>a global CORS configuration for frontend integration during development</li>
+ *     <li>a global CORS configuration for frontend integration in development and deployment environments</li>
  * </ul>
  *
  * <p>Using a single clock bean improves consistency in time-based operations and avoids
@@ -26,8 +26,8 @@ import java.time.Clock;
  * depend on the server local timezone.</p>
  *
  * <p>The global CORS configuration is centralized here to keep HTTP integration concerns
- * out of individual controllers and to prepare the backend for a separate frontend
- * application.</p>
+ * out of individual controllers and to support a separate frontend application both
+ * in local development and in deployed environments.</p>
  */
 @Configuration
 public class ApplicationConfig {
@@ -36,6 +36,11 @@ public class ApplicationConfig {
      * Frontend origin allowed during local development.
      */
     private static final String FRONTEND_DEV_ORIGIN = "http://localhost:5173";
+
+    /**
+     * Frontend origin allowed in the deployed Render environment.
+     */
+    private static final String FRONTEND_RENDER_ORIGIN = "https://rootcause-ui.onrender.com";
 
     /**
      * Creates the application clock bean using the UTC timezone.
@@ -50,13 +55,12 @@ public class ApplicationConfig {
     /**
      * Registers the global CORS policy used by the application.
      *
-     * <p>This configuration allows the local development frontend to consume the
-     * RootCause API from a separate origin while keeping the policy explicit and
-     * centralized.</p>
+     * <p>This configuration allows the frontend application to consume the
+     * RootCause API from the explicitly supported origins while keeping the
+     * policy centralized and predictable.</p>
      *
      * <p>The configuration applies to all API endpoints under {@code /api/v1/**} and
-     * currently allows the HTTP methods required by the existing backend and the
-     * upcoming frontend integration.</p>
+     * allows the HTTP methods currently required by the backend and frontend.</p>
      *
      * @return web MVC configurer that registers the global CORS mappings
      */
@@ -72,7 +76,10 @@ public class ApplicationConfig {
             @Override
             public void addCorsMappings(final CorsRegistry registry) {
                 registry.addMapping("/api/v1/**")
-                        .allowedOrigins(FRONTEND_DEV_ORIGIN)
+                        .allowedOrigins(
+                                FRONTEND_DEV_ORIGIN,
+                                FRONTEND_RENDER_ORIGIN
+                        )
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")
                         .maxAge(3600);
